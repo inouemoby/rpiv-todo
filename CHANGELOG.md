@@ -9,6 +9,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Added a low-priority user-message follow-up after a completed run when `in_progress` todos remain and no other message or continuation is queued.
 - Added terminal `failed` status, which propagates through `blockedBy` dependencies. Failed rows share completed rows' strikethrough and overlay fade-out behavior.
 - Tasks with `blockedBy` prerequisites can start or complete only after all prerequisites are completed.
 

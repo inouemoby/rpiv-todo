@@ -19,7 +19,7 @@
  * correctly after upgrade.
  */
 
-import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import type { KeyId } from "@earendil-works/pi-tui";
 import { COLLAPSE_KEY_OFF, resolveCollapseKey } from "./config.js";
 import { I18N_NAMESPACE } from "./state/i18n-bridge.js";
@@ -29,6 +29,7 @@ import {
 	evictSession,
 	getActiveRenderSession,
 	getRenderState,
+	getState,
 	replaceState,
 	setActiveRenderSession,
 	sid,
@@ -40,8 +41,17 @@ type I18nLoader = {
 	registerLocalesFromDir: (namespace: string, packageUrl: string, options?: { label?: string }) => void;
 };
 
+type SettleBoundaryEvent = {
+	outcome: "completed" | "aborted" | "error";
+	continue: boolean;
+	context: { pendingMessages: readonly unknown[] };
+};
+type SettleBoundaryHandler = (event: SettleBoundaryEvent, ctx: ExtensionContext) => void;
+
 /** Delay the overlay graph pre-warm until Pi's startup work has settled. */
 export const PREWARM_DELAY_MS = 2000;
+const IN_PROGRESS_TODO_REMINDER =
+	"There are still TODOs marked in_progress. Continue working on them and update their statuses when done.";
 
 type TodoOverlayModule = typeof import("./todo-overlay.js");
 type TodoOverlayImporter = () => Promise<TodoOverlayModule>;
@@ -286,5 +296,26 @@ export default function (pi: ExtensionAPI, importOverlay: TodoOverlayImporter = 
 
 	pi.on("agent_start", async () => {
 		todoOverlay?.hideTerminalTasksFromPreviousTurn();
+	});
+
+	// The settle boundary was added after the package's pinned development API.
+	// Keep the registration typed locally while requiring a runtime that supports it.
+	const onAgentBeforeSettle = pi.on.bind(pi) as unknown as (
+		event: "agent_before_settle",
+		handler: SettleBoundaryHandler,
+	) => () => void;
+	onAgentBeforeSettle("agent_before_settle", (event, ctx) => {
+		// Lowest-priority retry: only queue after a normal run when no other
+		// extension/user message or boundary continuation is pending.
+		if (
+			event.outcome !== "completed" ||
+			event.continue ||
+			event.context.pendingMessages.length > 0 ||
+			ctx.hasPendingMessages()
+		) {
+			return;
+		}
+		if (!getState(sid(ctx)).tasks.some((task) => task.status === "in_progress")) return;
+		pi.sendUserMessage(IN_PROGRESS_TODO_REMINDER, { deliverAs: "followUp" });
 	});
 }

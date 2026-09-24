@@ -51,6 +51,10 @@ by status.
 - **Tasks survive `/reload` and compaction.** Each tool call carries the full
   post-mutation snapshot, and the list is replayed from the session branch. No
   disk writes, nothing to lose.
+- **In-progress tasks get a low-priority nudge.** After a completed run, if an
+  `in_progress` task remains and no other message is queued, the extension sends
+  one user follow-up asking the agent to continue. Other task states do not
+  trigger it.
 - **Finished outcomes get out of the way.** Completed and failed rows stay
   visible for the rest of the turn, then disappear from the overlay at the start
   of the next one. Their statuses remain available through `/todos`.
@@ -102,7 +106,8 @@ this file — it never writes one. Full semantics:
 
 ## Requirements
 
-- A Pi Agent host. No API key, no model selection, no native dependencies.
+- Pi Agent `0.87.0` or newer for `agent_before_settle` support. No API key,
+  no model selection, no native dependencies.
 - An interactive session for the panel and `/todos`. Headless runs still get the
   `todo` tool; nothing is rendered.
 - [`@juicesharp/rpiv-i18n`](https://www.npmjs.com/package/@juicesharp/rpiv-i18n)

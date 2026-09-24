@@ -161,3 +161,12 @@ tasks, and the literal `update {id, status}` call shape for changing a task's
 status. A task cannot start or complete before its prerequisites are completed.
 Both are overridable — see
 [configuration.md](./configuration.md#guidance).
+
+## Low-priority continuation
+
+After a normally completed agent run, the extension queues one user-message
+follow-up if any task in the current session is still `in_progress`. It first
+checks for messages or a continuation already queued by another plugin; when
+one exists, it stays quiet. `pending`, `completed`, `deleted`, and `failed`
+tasks do not trigger the reminder. If the task remains `in_progress`, the check
+runs again when the next agent run settles.
