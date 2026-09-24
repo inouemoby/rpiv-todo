@@ -151,12 +151,12 @@ export const TodoParamsSchema = Type.Object({
 				Type.Array(Type.Number(), {
 					minItems: 1,
 					maxItems: MAX_BATCH_SIZE,
-					description: "Task ids to delete atomically (maximum 100).",
+					description: "Task ids for batch get or atomic delete (maximum 100).",
 				}),
 				Type.Literal("all"),
 			],
 			{
-				description: "Target id for update/get/delete. For delete, pass one number, an array of ids, or \"all\"; update/get require one number.",
+				description: "Target id for update/get/delete. For get, pass one number or an array of ids; for delete, pass one number, an array, or \"all\"; update requires one number.",
 			},
 		),
 	),

@@ -52,9 +52,10 @@ by status.
   post-mutation snapshot, and the list is replayed from the session branch. No
   disk writes, nothing to lose.
 - **Batch operations reuse the existing actions.** `create` accepts either one
-  task or a `tasks` array (up to 100), and `delete` accepts one numeric `id`, an
-  array of ids, or `"all"` in that same `id` field. `"all"` tombstones all
-  active tasks while preserving history and the id counter.
+  task or a `tasks` array (up to 100), `get` accepts one id or an id array to
+  return several task details together, and `delete` accepts one id, an id
+  array, or `"all"` in that same `id` field. `"all"` tombstones active tasks
+  while preserving history and the id counter.
 - **In-progress tasks get a low-priority nudge.** After a completed run, if an
   `in_progress` task remains and no other message is queued, the extension sends
   one user follow-up asking the agent to continue, including each task's ID,

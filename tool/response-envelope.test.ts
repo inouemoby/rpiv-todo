@@ -94,6 +94,14 @@ describe("formatContent", () => {
 		expect(formatContent(op, state)).toBe("#2 [pending] test\n  blocks: #1");
 	});
 
+	it("get batch — returns all requested details in order", () => {
+		const state = stateWith(t({ id: 1, subject: "first" }), t({ id: 2, subject: "second", description: "more" }));
+		const op: Op = { kind: "get_batch", tasks: [state.tasks[1]!, state.tasks[0]!] };
+		expect(formatContent(op, state)).toBe(
+			"Details for 2 tasks:\n\n#2 [pending] second\n  description: more\n\n#1 [pending] first",
+		);
+	});
+
 	it("get — emits activeForm line for in_progress task", () => {
 		const state = stateWith(t({ id: 1, subject: "build", status: "in_progress", activeForm: "Building" }));
 		const op: Op = { kind: "get", task: state.tasks[0]! };
@@ -166,6 +174,15 @@ describe("buildToolResult", () => {
 			content: [{ type: "text", text: "Created 2 tasks:\n#1: alpha (pending)\n#2: beta (pending)" }],
 			details: { action: "create", params, tasks: state.tasks, nextId: state.nextId },
 		});
+	});
+
+	it("get batch — envelope keeps the existing action and complete snapshot", () => {
+		const state = stateWith(t({ id: 1, subject: "alpha" }), t({ id: 2, subject: "beta" }));
+		const params = { id: [2, 1] };
+		const env = buildToolResult("get", params, state, { kind: "get_batch", tasks: [state.tasks[1]!, state.tasks[0]!] });
+		expect(env.details.action).toBe("get");
+		expect(env.content[0].text).toBe("Details for 2 tasks:\n\n#2 [pending] beta\n\n#1 [pending] alpha");
+		expect(env.details.tasks).toEqual(state.tasks);
 	});
 
 	it("envelope.details mirrors the canonical TaskDetails shape on success", () => {

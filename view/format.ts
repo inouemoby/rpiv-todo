@@ -134,6 +134,8 @@ export function renderTodoCall(
 			const subject = selectTaskSubjectById(state, args.id);
 			text += ` ${theme.fg("accent", subject ? sanitizeTerminalText(subject) : `#${args.id}`)}`;
 		}
+	} else if (args.action === "get" && Array.isArray(args.id)) {
+		text += ` ${theme.fg("dim", `${args.id.length} tasks`)}`;
 	} else if ((args.action === "update" || args.action === "get") && typeof args.id === "number") {
 		const subject = selectTaskSubjectById(state, args.id);
 		text += ` ${theme.fg("accent", subject ? sanitizeTerminalText(subject) : `#${args.id}`)}`;

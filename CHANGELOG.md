@@ -9,7 +9,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Extended the existing `create` action to accept an atomic `tasks` batch, and the existing `delete.id` parameter to accept one id, an id array, or `"all"`; removed the separate `clear` action.
+- Extended the existing `create` action to accept an atomic `tasks` batch, `get.id` to accept one id or an id array, and `delete.id` to accept one id, an id array, or `"all"`; removed the separate `clear` action.
 - Added a low-priority user-message follow-up after a completed run when `in_progress` todos remain and no other message or continuation is queued; the reminder includes the active tasks' content.
 - Added terminal `failed` status, which propagates through `blockedBy` dependencies. Failed rows share completed rows' strikethrough and overlay fade-out behavior.
 - Tasks with `blockedBy` prerequisites can start or complete only after all prerequisites are completed.

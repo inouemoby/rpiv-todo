@@ -78,6 +78,8 @@ export function formatContent(op: Op, state: TaskState): string {
 		}
 		case "get":
 			return formatGetLines(op.task, state);
+		case "get_batch":
+			return `Details for ${op.tasks.length} task${op.tasks.length === 1 ? "" : "s"}:\n\n${op.tasks.map((task) => formatGetLines(task, state)).join("\n\n")}`;
 		case "error":
 			return `Error: ${op.message}`;
 	}

@@ -11,7 +11,7 @@ for the `todo` tool registered by
 | `create` | `subject` or `tasks` | Adds one pending task or atomically adds a batch of up to 100. |
 | `update` | numeric `id` + at least one mutable field | Changes status, fields, or dependencies. |
 | `list` | — | Returns all tasks, optionally filtered by `status`. |
-| `get` | numeric `id` | Returns one task with its `blockedBy` and reverse `blocks` edges. |
+| `get` | numeric `id` or an id array | Returns one or several tasks with their `blockedBy` and reverse `blocks` edges. |
 | `delete` | `id` | Tombstones one id, an id array, or all active tasks through the same parameter. |
 
 ## Parameters
@@ -44,7 +44,7 @@ todo({
   addBlockedBy?: number[],            // additive merge into blockedBy
   removeBlockedBy?: number[],         // additive removal from blockedBy
 
-  // update / get / delete; delete accepts a number, a number[], or "all"
+  // update / get / delete; get accepts number or number[], delete also accepts "all"
   id?: number | number[] | "all",
 
   // update (sets this task's status) or list (filters by status)
@@ -62,11 +62,13 @@ array.
 
 `create` with `tasks` validates all 1–100 items before committing any, and
 assigns ids in input order. `blockedBy` may refer to existing tasks or earlier
-items in the same batch. `delete` with an id array requires 1–100 unique, active
-ids and validates the whole array before tombstoning any task. `delete` with
-`id: "all"` tombstones every active task while retaining existing tombstones and
-the current id counter. All deletion forms share the existing `delete` action
-and `id` parameter; there is no separate clear action.
+items in the same batch. `get` with an id array validates all 1–100 unique ids
+before returning details in input order; deleted tombstones are included just
+like scalar `get`. `delete` with an id array requires 1–100 unique, active ids
+and validates the whole array before tombstoning any task. `id: "all"`
+tombstones every active task while retaining existing tombstones and the current
+id counter. All batch forms reuse the existing `create`, `get`, or `delete`
+action; there are no extra actions.
 
 ## Status transitions
 
@@ -177,7 +179,9 @@ that it was a no-op instead of a fresh `Updated #N`.
 | `addBlockedBy would create a cycle in the blockedBy graph` | The edge would close a cycle. |
 | `#N is already deleted` | `delete` or its id array includes a tombstone. |
 | `delete id must be a number, number array, or all` | `delete` receives an unsupported id value. |
-| `update requires one numeric id` / `get requires one numeric id` | A non-scalar id is passed to `update` or `get`. |
+| `update requires one numeric id` | A non-scalar id is passed to `update`. |
+| `get requires one numeric id or a number array` | `get` receives `"all"` or another unsupported id type. |
+| `id array must contain at least one id for batch get` / `duplicate id #N in batch get` / `get supports at most 100 ids per batch` | Invalid batch `get` targets. |
 
 Errors are returned in-band: `content` carries `Error: …` and `details.error`
 carries the bare message. Task state is unchanged.
@@ -186,7 +190,8 @@ carries the bare message. Task state is unchanged.
 
 The tool ships a `promptSnippet` and `promptGuidelines` telling the model when
 to open a list, to keep exactly one task `in_progress`, to pass multiple create
-records in `create.tasks`, to target one/many/all tasks through `delete.id`, to
+records in `create.tasks`, to retrieve multiple task details through `get.id`,
+to target one/many/all tasks through `delete.id`, to
 mark work completed immediately rather than in batches, how `failed` cascades
 only through dependent tasks, and the literal `update {id, status}` call shape. A task cannot start or complete before its prerequisites are completed.
 Both are overridable — see

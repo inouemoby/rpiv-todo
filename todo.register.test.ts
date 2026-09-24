@@ -38,7 +38,7 @@ describe("registerTodoTool — registration shape", () => {
 		expect((tool.promptGuidelines as string[]).length).toBeGreaterThan(0);
 	});
 
-	it("keeps the original action set and exposes batch semantics on create/delete", () => {
+	it("keeps the original action set and exposes batch semantics on create/get/delete", () => {
 		const { tool } = setup();
 		const raw = JSON.stringify(tool.parameters);
 		for (const action of ["create", "update", "list", "get", "delete"]) {
@@ -48,6 +48,7 @@ describe("registerTodoTool — registration shape", () => {
 			expect(raw).not.toContain(removedAction);
 		}
 		expect(raw).toContain("tasks");
+		expect(raw).toContain("batch get");
 		expect(raw).toContain("all");
 		expect(raw).toContain("100");
 		for (const status of ["pending", "in_progress", "completed", "failed", "deleted"]) {
@@ -78,6 +79,18 @@ describe("registerTodoTool — execute mutates module state", () => {
 			[2, "second", "pending"],
 		]);
 		expect(result?.content[0].text).toContain("Created 2 tasks");
+	});
+
+	it("get accepts an id array and returns all task details in request order", async () => {
+		const { tool } = setup();
+		await call(tool, { action: "create", tasks: [{ subject: "first", description: "one" }, { subject: "second", description: "two" }] });
+		const result = await call(tool, { action: "get", id: [2, 1] });
+		const details = result?.details as TaskDetails;
+		expect(details.action).toBe("get");
+		expect(result?.content[0].text).toBe(
+			"Details for 2 tasks:\n\n#2 [pending] second\n  description: two\n\n#1 [pending] first\n  description: one",
+		);
+		expect(details.tasks).toHaveLength(2);
 	});
 
 	it("delete accepts an id array and tombstones tasks while preserving the id counter", async () => {
@@ -151,9 +164,11 @@ describe("registerTodoTool — renderCall", () => {
 	it("existing actions render concise batch targets", () => {
 		const { tool } = setup();
 		const create = tool.renderCall?.({ action: "create", tasks: [{ subject: "a" }, { subject: "b" }] } as never, theme, undefined as never) as unknown as Text;
+		const get = tool.renderCall?.({ action: "get", id: [1, 2] } as never, theme, undefined as never) as unknown as Text;
 		const remove = tool.renderCall?.({ action: "delete", id: [1, 2, 3] } as never, theme, undefined as never) as unknown as Text;
 		const removeAll = tool.renderCall?.({ action: "delete", id: "all" } as never, theme, undefined as never) as unknown as Text;
 		expect((create as unknown as { text: string }).text).toContain("2 tasks");
+		expect((get as unknown as { text: string }).text).toContain("2 tasks");
 		expect((remove as unknown as { text: string }).text).toContain("3 tasks");
 		expect((removeAll as unknown as { text: string }).text).toContain("all tasks");
 	});

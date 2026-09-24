@@ -382,7 +382,7 @@ describe("applyTaskMutation — list/get/delete", () => {
 		expect(result.state.nextId).toBe(state.nextId);
 	});
 
-	it("update and get still require one numeric id", () => {
+	it("update still requires one numeric id while get accepts scalar or array ids", () => {
 		const state = stateWith(task({ id: 1, subject: "one" }));
 		expect(applyTaskMutation(state, "update", { id: [1], subject: "changed" }).op).toEqual({
 			kind: "error",
@@ -390,7 +390,7 @@ describe("applyTaskMutation — list/get/delete", () => {
 		});
 		expect(applyTaskMutation(state, "get", { id: "all" }).op).toEqual({
 			kind: "error",
-			message: "get requires one numeric id",
+			message: "get requires one numeric id or a number array",
 		});
 	});
 
@@ -398,6 +398,27 @@ describe("applyTaskMutation — list/get/delete", () => {
 		const state = stateWith(task({ id: 1, subject: "alpha" }));
 		const result = applyTaskMutation(state, "get", { id: 1 });
 		expect(result.op).toEqual({ kind: "get", task: state.tasks[0] });
+	});
+
+	it("get accepts an id array and returns details in request order, including tombstones", () => {
+		const state = stateWith(task({ id: 1, subject: "active" }), task({ id: 2, subject: "old", status: "deleted" }));
+		const result = applyTaskMutation(state, "get", { id: [2, 1] });
+		expect(result.op).toEqual({ kind: "get_batch", tasks: [state.tasks[1], state.tasks[0]] });
+		expect(result.state).toBe(state);
+	});
+
+	it("get batch validates the complete unique id array", () => {
+		const state = stateWith(task({ id: 1, subject: "one" }));
+		expect(applyTaskMutation(state, "get", { id: [1, 99] }).op).toEqual({ kind: "error", message: "#99 not found" });
+		expect(applyTaskMutation(state, "get", { id: [1, 1] }).op).toEqual({ kind: "error", message: "duplicate id #1 in batch get" });
+		expect(applyTaskMutation(state, "get", { id: [] }).op).toEqual({
+			kind: "error",
+			message: "id array must contain at least one id for batch get",
+		});
+		expect(applyTaskMutation(state, "get", { id: Array.from({ length: 101 }, (_, index) => index + 10) }).op).toEqual({
+			kind: "error",
+			message: "get supports at most 100 ids per batch",
+		});
 	});
 });
 

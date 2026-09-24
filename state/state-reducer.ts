@@ -27,6 +27,7 @@ export type Op =
 	| { kind: "delete_batch"; deletedTasks: Array<{ id: number; subject: string }>; all?: boolean }
 	| { kind: "list"; statusFilter?: TaskStatus; includeDeleted: boolean }
 	| { kind: "get"; task: Task }
+	| { kind: "get_batch"; tasks: Task[] }
 	| { kind: "error"; message: string };
 
 export interface ApplyResult {
@@ -95,6 +96,21 @@ function deleteTaskBatch(state: TaskState, ids: number[]): ApplyResult {
 		},
 		op: { kind: "delete_batch", deletedTasks: selected.map(({ id, subject }) => ({ id, subject })) },
 	};
+}
+
+function getTaskBatch(state: TaskState, ids: number[]): ApplyResult {
+	if (ids.length === 0) return errorResult(state, "id array must contain at least one id for batch get");
+	if (ids.length > MAX_BATCH_SIZE) return errorResult(state, `get supports at most ${MAX_BATCH_SIZE} ids per batch`);
+	const seen = new Set<number>();
+	const selected: Task[] = [];
+	for (const id of ids) {
+		if (seen.has(id)) return errorResult(state, `duplicate id #${id} in batch get`);
+		seen.add(id);
+		const task = state.tasks.find((candidate) => candidate.id === id);
+		if (!task) return errorResult(state, `#${id} not found`);
+		selected.push(task);
+	}
+	return { state, op: { kind: "get_batch", tasks: selected } };
 }
 
 function sameNumberList(a: number[] | undefined, b: number[] | undefined): boolean {
@@ -331,7 +347,8 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 
 		case "get": {
 			if (params.id === undefined) return errorResult(state, "id required for get");
-			if (typeof params.id !== "number") return errorResult(state, "get requires one numeric id");
+			if (Array.isArray(params.id)) return getTaskBatch(state, params.id);
+			if (typeof params.id !== "number") return errorResult(state, "get requires one numeric id or a number array");
 			const task = state.tasks.find((t) => t.id === params.id);
 			if (!task) return errorResult(state, `#${params.id} not found`);
 			return { state, op: { kind: "get", task } };
