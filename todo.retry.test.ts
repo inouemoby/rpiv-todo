@@ -66,7 +66,12 @@ describe("in-progress todo low-priority retry", () => {
 		const { pi, handler, tool } = setup();
 		const ctx = makeCtx();
 		await createTask(tool, ctx, "pending task");
-		await createTask(tool, ctx, "active task");
+		await callTodo(tool, ctx, {
+			action: "create",
+			subject: "active task",
+			description: "resume the parser",
+			activeForm: "writing parser tests",
+		});
 		await callTodo(tool, ctx, { action: "update", id: 2, status: "in_progress" });
 		await createTask(tool, ctx, "completed task");
 		await callTodo(tool, ctx, { action: "update", id: 3, status: "completed" });
@@ -78,9 +83,15 @@ describe("in-progress todo low-priority retry", () => {
 		await runBeforeSettle(handler, ctx);
 
 		expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
-		expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining("TODOs marked in_progress"), {
-			deliverAs: "followUp",
-		});
+		const message = (pi.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+		expect(message).toContain('"subject":"active task"');
+		expect(message).toContain('"description":"resume the parser"');
+		expect(message).toContain('"activeForm":"writing parser tests"');
+		expect(message).not.toContain("pending task");
+		expect(message).not.toContain("completed task");
+		expect(message).not.toContain("deleted task");
+		expect(message).not.toContain("failed task");
+		expect(pi.sendUserMessage).toHaveBeenCalledWith(message, { deliverAs: "followUp" });
 	});
 
 	it("does not retry for pending, completed, deleted, or failed tasks alone", async () => {
@@ -109,6 +120,19 @@ describe("in-progress todo low-priority retry", () => {
 		await runBeforeSettle(handler, makeCtx(false), {
 			pendingMessages: [{ role: "user", content: "another plugin's follow-up" }],
 		});
+
+		expect(pi.sendUserMessage).not.toHaveBeenCalled();
+	});
+
+	it("does not send a stale retry after another queued follow-up completes the task", async () => {
+		const { pi, handler, tool } = setup();
+		const pendingCtx = makeCtx(true);
+		await createTask(tool, pendingCtx, "active task");
+		await callTodo(tool, pendingCtx, { action: "update", id: 1, status: "in_progress" });
+
+		await runBeforeSettle(handler, pendingCtx);
+		await callTodo(tool, pendingCtx, { action: "update", id: 1, status: "completed" });
+		await runBeforeSettle(handler, makeCtx(false));
 
 		expect(pi.sendUserMessage).not.toHaveBeenCalled();
 	});

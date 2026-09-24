@@ -34,7 +34,7 @@ import {
 	setActiveRenderSession,
 	sid,
 } from "./state/store.js";
-import { registerTodosCommand, registerTodoTool, TOOL_NAME } from "./todo.js";
+import { registerTodosCommand, registerTodoTool, type Task, TOOL_NAME } from "./todo.js";
 import type { TodoOverlay } from "./todo-overlay.js";
 
 type I18nLoader = {
@@ -51,7 +51,20 @@ type SettleBoundaryHandler = (event: SettleBoundaryEvent, ctx: ExtensionContext)
 /** Delay the overlay graph pre-warm until Pi's startup work has settled. */
 export const PREWARM_DELAY_MS = 2000;
 const IN_PROGRESS_TODO_REMINDER =
-	"There are still TODOs marked in_progress. Continue working on them and update their statuses when done.";
+	"There are still TODOs marked in_progress. Continue working on them and update their statuses when done. Current in-progress TODO records (JSON data):";
+
+function formatInProgressTodoReminder(tasks: readonly Task[]): string {
+	const records = tasks.map((task) => {
+		const fields = {
+			status: task.status,
+			subject: task.subject,
+			...(task.description !== undefined ? { description: task.description } : {}),
+			...(task.activeForm !== undefined ? { activeForm: task.activeForm } : {}),
+		};
+		return `- #${task.id} ${JSON.stringify(fields)}`;
+	});
+	return `${IN_PROGRESS_TODO_REMINDER}\n${records.join("\n")}`;
+}
 
 type TodoOverlayModule = typeof import("./todo-overlay.js");
 type TodoOverlayImporter = () => Promise<TodoOverlayModule>;
@@ -315,7 +328,8 @@ export default function (pi: ExtensionAPI, importOverlay: TodoOverlayImporter = 
 		) {
 			return;
 		}
-		if (!getState(sid(ctx)).tasks.some((task) => task.status === "in_progress")) return;
-		pi.sendUserMessage(IN_PROGRESS_TODO_REMINDER, { deliverAs: "followUp" });
+		const inProgressTasks = getState(sid(ctx)).tasks.filter((task) => task.status === "in_progress");
+		if (inProgressTasks.length === 0) return;
+		pi.sendUserMessage(formatInProgressTodoReminder(inProgressTasks), { deliverAs: "followUp" });
 	});
 }
