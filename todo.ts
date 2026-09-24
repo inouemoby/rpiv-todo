@@ -46,7 +46,7 @@ export { isTransitionValid } from "./state/invariants.js";
 export { applyTaskMutation } from "./state/state-reducer.js";
 export { __resetState, getNextId, getTodos, setActiveRenderSession, sid } from "./state/store.js";
 export { deriveBlocks, detectCycle } from "./state/task-graph.js";
-export type { Task, TaskAction, TaskDetails, TaskStatus } from "./tool/types.js";
+export type { NewTaskInput, Task, TaskAction, TaskDetails, TaskStatus } from "./tool/types.js";
 export { TOOL_NAME } from "./tool/types.js";
 
 // ---------------------------------------------------------------------------
@@ -56,6 +56,8 @@ export { TOOL_NAME } from "./tool/types.js";
 export const DEFAULT_PROMPT_SNIPPET = "Manage a task list to track multi-step progress";
 export const DEFAULT_PROMPT_GUIDELINES: string[] = [
 	"Use `todo` for complex work with 3+ steps, when the user gives you a list of tasks, or immediately after receiving new instructions to capture requirements. Skip it for single trivial tasks and purely conversational requests.",
+	"Use `create` with a `tasks` array to add several tasks atomically (up to 100); each item needs a non-blank subject. `blockedBy` may reference existing tasks or earlier items in the same array.",
+	"Use the existing `delete` action with `id` set to one number, an array of numbers, or `all` to tombstone one, several, or every active task. Deleting all preserves tombstone history and the id counter.",
 	"When starting a task from the todo list, mark it in_progress BEFORE beginning work. Mark it completed IMMEDIATELY when done — never batch completions. Exactly one task in_progress at a time.",
 	"Never mark a task completed if tests are failing, the implementation is partial, or you hit unresolved errors — keep it in_progress, mark it failed if it cannot be completed, and create a new task for the blocker instead.",
 	"Task status is a 5-state machine: pending → in_progress → completed, plus failed and deleted terminal outcomes. Pass activeForm (present-continuous label, e.g. 'researching existing tool') when marking in_progress.",
@@ -71,7 +73,7 @@ export function registerTodoTool(pi: ExtensionAPI): void {
 		name: TOOL_NAME,
 		label: TOOL_LABEL,
 		description:
-			"Manage a task list for tracking multi-step progress. Actions: create (new task), update (change status/fields/dependencies), list (all tasks, optionally filtered by status), get (single task details), delete (tombstone), clear (reset all). Status: pending → in_progress → completed, plus failed and deleted terminal outcomes. A failed task also fails tasks that depend on it. Use this to plan and track multi-step work like research, design, and implementation.",
+			"Manage a task list for tracking multi-step progress. Actions: create (one task or an atomic tasks[] batch), update (change status/fields/dependencies), list (all tasks, optionally filtered by status), get (single task), delete (id is one number, an array of numbers, or all; all forms tombstones). Status: pending → in_progress → completed, plus failed and deleted terminal outcomes. A failed task also fails tasks that depend on it. Use this to plan and track multi-step work like research, design, and implementation.",
 		promptSnippet: guidance.promptSnippet ?? DEFAULT_PROMPT_SNIPPET,
 		promptGuidelines: guidance.promptGuidelines ?? DEFAULT_PROMPT_GUIDELINES,
 		parameters: TodoParamsSchema,

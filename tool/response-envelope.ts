@@ -49,6 +49,13 @@ export function formatContent(op: Op, state: TaskState): string {
 			if (!t) return `Created #${op.taskId}`;
 			return `Created #${t.id}: ${sanitizeTerminalText(t.subject)} (pending)`;
 		}
+		case "create_batch": {
+			const rows = op.taskIds.map((id) => {
+				const task = state.tasks.find((candidate) => candidate.id === id);
+				return task ? `#${task.id}: ${sanitizeTerminalText(task.subject)} (pending)` : `#${id}`;
+			});
+			return `Created ${rows.length} task${rows.length === 1 ? "" : "s"}:\n${rows.join("\n")}`;
+		}
 		case "update": {
 			if (!op.changed) {
 				return `No change: #${op.id} already matches the requested values (status: ${op.toStatus})`;
@@ -60,8 +67,9 @@ export function formatContent(op: Op, state: TaskState): string {
 		}
 		case "delete":
 			return `Deleted #${op.id}: ${sanitizeTerminalText(op.subject)}`;
-		case "clear":
-			return `Cleared ${op.count} tasks`;
+		case "delete_batch":
+			if (op.all) return `Deleted all ${op.deletedTasks.length} task${op.deletedTasks.length === 1 ? "" : "s"}`;
+			return `Deleted ${op.deletedTasks.length} task${op.deletedTasks.length === 1 ? "" : "s"}:\n${op.deletedTasks.map((task) => `#${task.id}: ${sanitizeTerminalText(task.subject)}`).join("\n")}`;
 		case "list": {
 			let view = state.tasks;
 			if (!op.includeDeleted) view = view.filter((t) => t.status !== "deleted");

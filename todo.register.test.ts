@@ -38,12 +38,18 @@ describe("registerTodoTool — registration shape", () => {
 		expect((tool.promptGuidelines as string[]).length).toBeGreaterThan(0);
 	});
 
-	it("exposes a typebox parameters schema declaring the six actions", () => {
+	it("keeps the original action set and exposes batch semantics on create/delete", () => {
 		const { tool } = setup();
 		const raw = JSON.stringify(tool.parameters);
-		for (const action of ["create", "update", "list", "get", "delete", "clear"]) {
+		for (const action of ["create", "update", "list", "get", "delete"]) {
 			expect(raw).toContain(action);
 		}
+		for (const removedAction of ["create_many", "delete_many", "delete_all", "clear"]) {
+			expect(raw).not.toContain(removedAction);
+		}
+		expect(raw).toContain("tasks");
+		expect(raw).toContain("all");
+		expect(raw).toContain("100");
 		for (const status of ["pending", "in_progress", "completed", "failed", "deleted"]) {
 			expect(raw).toContain(status);
 		}
@@ -59,15 +65,41 @@ describe("registerTodoTool — execute mutates module state", () => {
 		expect(r2?.content[0]).toMatchObject({ text: expect.stringContaining("first") });
 	});
 
-	it("clear resets module state and nextId", async () => {
+	it("create accepts a batch and returns one complete replay snapshot", async () => {
 		const { tool } = setup();
-		await call(tool, { action: "create", subject: "a" });
-		await call(tool, { action: "create", subject: "b" });
-		const r = await call(tool, { action: "clear" });
-		const d = r?.details as TaskDetails;
-		expect(d.tasks).toEqual([]);
-		expect(d.nextId).toBe(1);
+		const result = await call(tool, {
+			action: "create",
+			tasks: [{ subject: "first" }, { subject: "second", blockedBy: [1] }],
+		});
+		const details = result?.details as TaskDetails;
+		expect(details.action).toBe("create");
+		expect(details.tasks.map((task) => [task.id, task.subject, task.status])).toEqual([
+			[1, "first", "pending"],
+			[2, "second", "pending"],
+		]);
+		expect(result?.content[0].text).toContain("Created 2 tasks");
 	});
+
+	it("delete accepts an id array and tombstones tasks while preserving the id counter", async () => {
+		const { tool } = setup();
+		await call(tool, { action: "create", tasks: [{ subject: "first" }, { subject: "second" }] });
+		const result = await call(tool, { action: "delete", id: [1, 2] });
+		const details = result?.details as TaskDetails;
+		expect(details.tasks.map((task) => task.status)).toEqual(["deleted", "deleted"]);
+		expect(details.nextId).toBe(3);
+		expect(result?.content[0].text).toContain("Deleted 2 tasks");
+	});
+
+	it("delete with id all tombstones every active task and preserves the id counter", async () => {
+		const { tool } = setup();
+		await call(tool, { action: "create", subject: "first" });
+		const result = await call(tool, { action: "delete", id: "all" });
+		const details = result?.details as TaskDetails;
+		expect(details.tasks).toMatchObject([{ id: 1, subject: "first", status: "deleted" }]);
+		expect(details.nextId).toBe(2);
+		expect(result?.content[0].text).toBe("Deleted all 1 task");
+	});
+
 });
 
 describe("registerTodoTool — renderCall", () => {
@@ -116,10 +148,14 @@ describe("registerTodoTool — renderCall", () => {
 		expect((node as unknown as { text: string }).text).toContain("in progress");
 	});
 
-	it("clear action renders only the base prefix + glyph", () => {
+	it("existing actions render concise batch targets", () => {
 		const { tool } = setup();
-		const node = tool.renderCall?.({ action: "clear" } as never, theme, undefined as never) as unknown as Text;
-		expect((node as unknown as { text: string }).text).toContain("∅");
+		const create = tool.renderCall?.({ action: "create", tasks: [{ subject: "a" }, { subject: "b" }] } as never, theme, undefined as never) as unknown as Text;
+		const remove = tool.renderCall?.({ action: "delete", id: [1, 2, 3] } as never, theme, undefined as never) as unknown as Text;
+		const removeAll = tool.renderCall?.({ action: "delete", id: "all" } as never, theme, undefined as never) as unknown as Text;
+		expect((create as unknown as { text: string }).text).toContain("2 tasks");
+		expect((remove as unknown as { text: string }).text).toContain("3 tasks");
+		expect((removeAll as unknown as { text: string }).text).toContain("all tasks");
 	});
 });
 
@@ -178,12 +214,17 @@ describe("registerTodoTool — renderResult", () => {
 		expect((node as unknown as { text: string }).text).toContain("✓");
 	});
 
-	it("clear renders the plain '✓' fallback", async () => {
+	it("batch create/delete and delete-all render appropriate result status", async () => {
 		const { tool } = setup();
-		await call(tool, { action: "clear" });
-		const r = await call(tool, { action: "clear" });
-		const node = tool.renderResult?.(r as never, {} as never, theme, undefined as never) as unknown as Text;
-		expect((node as unknown as { text: string }).text).toContain("✓");
+		const created = await call(tool, { action: "create", tasks: [{ subject: "a" }, { subject: "b" }] });
+		const createNode = tool.renderResult?.(created as never, {} as never, theme, undefined as never) as unknown as Text;
+		expect((createNode as unknown as { text: string }).text).toContain("pending");
+		const deleted = await call(tool, { action: "delete", id: [1, 2] });
+		const deleteNode = tool.renderResult?.(deleted as never, {} as never, theme, undefined as never) as unknown as Text;
+		expect((deleteNode as unknown as { text: string }).text).toContain("deleted");
+		const all = await call(tool, { action: "delete", id: "all" });
+		const allNode = tool.renderResult?.(all as never, {} as never, theme, undefined as never) as unknown as Text;
+		expect((allNode as unknown as { text: string }).text).toContain("✓");
 	});
 
 	it("missing details falls back to plain '✓'", () => {

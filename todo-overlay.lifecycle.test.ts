@@ -100,10 +100,10 @@ describe("TodoOverlay — lifecycle", () => {
 		overlay.setUICtx(ui);
 		overlay.update();
 		const setWidget = ui.setWidget as ReturnType<typeof vi.fn>;
-		// Delete → then hard-remove via "clear" to leave visibility list empty.
+		// Delete all tasks through the existing delete action to leave visibility empty.
 		await tool.execute?.(
 			"tc",
-			{ action: "clear" } as never,
+			{ action: "delete", id: "all" } as never,
 			undefined as never,
 			undefined as never,
 			createMockCtx() as never,
@@ -122,7 +122,7 @@ describe("TodoOverlay — lifecycle", () => {
 		overlay.update();
 		await tool.execute?.(
 			"tc",
-			{ action: "clear" } as never,
+			{ action: "delete", id: "all" } as never,
 			undefined as never,
 			undefined as never,
 			createMockCtx() as never,

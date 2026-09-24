@@ -56,10 +56,6 @@ describe("formatContent", () => {
 		expect(formatContent({ kind: "delete", id: 1, subject: "ship" }, state)).toBe("Deleted #1: ship");
 	});
 
-	it("clear — emits prior count", () => {
-		expect(formatContent({ kind: "clear", count: 4 }, stateWith())).toBe("Cleared 4 tasks");
-	});
-
 	it("list — 'No tasks' when filtered view is empty", () => {
 		const state = stateWith(t({ id: 1, subject: "x", status: "deleted" }));
 		expect(formatContent({ kind: "list", includeDeleted: false }, state)).toBe("No tasks");
@@ -127,6 +123,28 @@ describe("formatContent", () => {
 		);
 	});
 
+	it("batch create — lists assigned ids and subjects", () => {
+		const state = stateWith(t({ id: 4, subject: "alpha" }), t({ id: 5, subject: "beta" }));
+		expect(formatContent({ kind: "create_batch", taskIds: [4, 5] }, state)).toBe(
+			"Created 2 tasks:\n#4: alpha (pending)\n#5: beta (pending)",
+		);
+	});
+
+	it("batch delete — lists tombstoned ids and subjects", () => {
+		expect(formatContent({
+			kind: "delete_batch",
+			deletedTasks: [{ id: 4, subject: "alpha" }, { id: 5, subject: "beta" }],
+		}, stateWith())).toBe("Deleted 2 tasks:\n#4: alpha\n#5: beta");
+	});
+
+	it("delete with id all — emits prior count", () => {
+		expect(formatContent({
+			kind: "delete_batch",
+			deletedTasks: [{ id: 1, subject: "one" }, { id: 2, subject: "two" }, { id: 3, subject: "three" }],
+			all: true,
+		}, stateWith())).toBe("Deleted all 3 tasks");
+	});
+
 	it("create — defensive fallback when op.taskId is unknown to state", () => {
 		// Defensive branch — exercises the early-return when find() returns undefined.
 		expect(formatContent({ kind: "create", taskId: 999 }, stateWith())).toBe("Created #999");
@@ -140,6 +158,16 @@ describe("formatContent", () => {
 });
 
 describe("buildToolResult", () => {
+	it("create batch — envelope stores the existing action and complete snapshot", () => {
+		const state = stateWith(t({ id: 1, subject: "alpha" }), t({ id: 2, subject: "beta" }));
+		const params = { tasks: [{ subject: "alpha" }, { subject: "beta" }] };
+		const env = buildToolResult("create", params, state, { kind: "create_batch", taskIds: [1, 2] });
+		expect(env).toEqual({
+			content: [{ type: "text", text: "Created 2 tasks:\n#1: alpha (pending)\n#2: beta (pending)" }],
+			details: { action: "create", params, tasks: state.tasks, nextId: state.nextId },
+		});
+	});
+
 	it("envelope.details mirrors the canonical TaskDetails shape on success", () => {
 		const state = stateWith(t({ id: 1, subject: "alpha" }));
 		const env = buildToolResult("create", { subject: "alpha" }, state, { kind: "create", taskId: 1 });

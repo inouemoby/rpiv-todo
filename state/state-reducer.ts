@@ -1,4 +1,4 @@
-import type { Task, TaskAction, TaskMutationParams, TaskStatus } from "../tool/types.js";
+import { MAX_BATCH_SIZE, type NewTaskInput, type Task, type TaskAction, type TaskMutationParams, type TaskStatus } from "../tool/types.js";
 import { isTransitionValid } from "./invariants.js";
 import type { TaskState } from "./state.js";
 import { deriveBlocks, detectCycle } from "./task-graph.js";
@@ -14,6 +14,7 @@ import { deriveBlocks, detectCycle } from "./task-graph.js";
  */
 export type Op =
 	| { kind: "create"; taskId: number }
+	| { kind: "create_batch"; taskIds: number[] }
 	| {
 			kind: "update";
 			id: number;
@@ -23,9 +24,9 @@ export type Op =
 			failedDependentIds?: number[];
 	  }
 	| { kind: "delete"; id: number; subject: string }
+	| { kind: "delete_batch"; deletedTasks: Array<{ id: number; subject: string }>; all?: boolean }
 	| { kind: "list"; statusFilter?: TaskStatus; includeDeleted: boolean }
 	| { kind: "get"; task: Task }
-	| { kind: "clear"; count: number }
 	| { kind: "error"; message: string };
 
 export interface ApplyResult {
@@ -35,6 +36,65 @@ export interface ApplyResult {
 
 function errorResult(state: TaskState, message: string): ApplyResult {
 	return { state, op: { kind: "error", message } };
+}
+
+function makeNewTask(input: NewTaskInput, id: number): Task {
+	const task: Task = { id, subject: input.subject, status: "pending" };
+	if (input.description) task.description = input.description;
+	if (input.activeForm) task.activeForm = input.activeForm;
+	if (input.blockedBy?.length) task.blockedBy = [...input.blockedBy];
+	if (input.owner) task.owner = input.owner;
+	if (input.metadata) task.metadata = { ...input.metadata };
+	return task;
+}
+
+function createTaskBatch(state: TaskState, inputs: NewTaskInput[]): ApplyResult {
+	if (inputs.length === 0) return errorResult(state, "tasks must contain at least one item for batch create");
+	if (inputs.length > MAX_BATCH_SIZE) return errorResult(state, `create supports at most ${MAX_BATCH_SIZE} tasks per batch`);
+
+	const tasks = [...state.tasks];
+	const taskIds: number[] = [];
+	for (let index = 0; index < inputs.length; index++) {
+		const input = inputs[index];
+		if (!input || typeof input.subject !== "string" || !input.subject.trim()) {
+			return errorResult(state, `tasks[${index}].subject required for batch create`);
+		}
+		const id = state.nextId + index;
+		for (const dep of input.blockedBy ?? []) {
+			if (dep === id) return errorResult(state, `cannot block #${id} on itself`);
+			const depTask = tasks.find((task) => task.id === dep);
+			if (!depTask) return errorResult(state, `tasks[${index}].blockedBy: #${dep} not found`);
+			if (depTask.status === "deleted") return errorResult(state, `tasks[${index}].blockedBy: #${dep} is deleted`);
+			if (depTask.status === "failed") return errorResult(state, `tasks[${index}].blockedBy: #${dep} is failed`);
+		}
+		const created = makeNewTask(input, id);
+		tasks.push(created);
+		taskIds.push(id);
+	}
+	return { state: { tasks, nextId: state.nextId + inputs.length }, op: { kind: "create_batch", taskIds } };
+}
+
+function deleteTaskBatch(state: TaskState, ids: number[]): ApplyResult {
+	if (ids.length === 0) return errorResult(state, "id array must contain at least one id for batch delete");
+	if (ids.length > MAX_BATCH_SIZE) return errorResult(state, `delete supports at most ${MAX_BATCH_SIZE} ids per batch`);
+	const seen = new Set<number>();
+	const selected: Task[] = [];
+	for (const id of ids) {
+		if (seen.has(id)) return errorResult(state, `duplicate id #${id} in batch delete`);
+		seen.add(id);
+		const task = state.tasks.find((candidate) => candidate.id === id);
+		if (!task) return errorResult(state, `#${id} not found`);
+		if (task.status === "deleted") return errorResult(state, `#${id} is already deleted`);
+		selected.push(task);
+	}
+	const deletedIds = new Set(ids);
+	return {
+		state: {
+			tasks: state.tasks.map((task) => deletedIds.has(task.id) ? { ...task, status: "deleted" } : task),
+			nextId: state.nextId,
+		},
+		op: { kind: "delete_batch", deletedTasks: selected.map(({ id, subject }) => ({ id, subject })) },
+	};
 }
 
 function sameNumberList(a: number[] | undefined, b: number[] | undefined): boolean {
@@ -113,6 +173,20 @@ function taskChanged(before: Task, after: Task): boolean {
 export function applyTaskMutation(state: TaskState, action: TaskAction, params: TaskMutationParams): ApplyResult {
 	switch (action) {
 		case "create": {
+			if (params.tasks !== undefined) {
+				if (
+					params.subject !== undefined ||
+					params.description !== undefined ||
+					params.activeForm !== undefined ||
+					params.blockedBy !== undefined ||
+					params.owner !== undefined ||
+					params.metadata !== undefined
+				) {
+					return errorResult(state, "create accepts either one task or tasks[], not both");
+				}
+				if (!Array.isArray(params.tasks)) return errorResult(state, "tasks must be an array for batch create");
+				return createTaskBatch(state, params.tasks);
+			}
 			if (!params.subject?.trim()) {
 				return errorResult(state, "subject required for create");
 			}
@@ -124,26 +198,24 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 					if (depTask.status === "failed") return errorResult(state, `blockedBy: #${dep} is failed`);
 				}
 			}
-			const newTask: Task = {
-				id: state.nextId,
+			const newTask = makeNewTask({
 				subject: params.subject,
-				status: "pending",
-			};
-			if (params.description) newTask.description = params.description;
-			if (params.activeForm) newTask.activeForm = params.activeForm;
-			if (params.blockedBy?.length) newTask.blockedBy = [...params.blockedBy];
-			if (params.owner) newTask.owner = params.owner;
-			if (params.metadata) newTask.metadata = { ...params.metadata };
-
-			const newTasks = [...state.tasks, newTask];
+				description: params.description,
+				activeForm: params.activeForm,
+				blockedBy: params.blockedBy,
+				owner: params.owner,
+				metadata: params.metadata,
+			}, state.nextId);
 			return {
-				state: { tasks: newTasks, nextId: state.nextId + 1 },
+				state: { tasks: [...state.tasks, newTask], nextId: state.nextId + 1 },
 				op: { kind: "create", taskId: newTask.id },
 			};
 		}
 
+
 		case "update": {
 			if (params.id === undefined) return errorResult(state, "id required for update");
+			if (typeof params.id !== "number") return errorResult(state, "update requires one numeric id");
 			const idx = state.tasks.findIndex((t) => t.id === params.id);
 			if (idx === -1) return errorResult(state, `#${params.id} not found`);
 			const current = state.tasks[idx];
@@ -259,6 +331,7 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 
 		case "get": {
 			if (params.id === undefined) return errorResult(state, "id required for get");
+			if (typeof params.id !== "number") return errorResult(state, "get requires one numeric id");
 			const task = state.tasks.find((t) => t.id === params.id);
 			if (!task) return errorResult(state, `#${params.id} not found`);
 			return { state, op: { kind: "get", task } };
@@ -266,6 +339,22 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 
 		case "delete": {
 			if (params.id === undefined) return errorResult(state, "id required for delete");
+			if (params.id === "all") {
+				const activeTasks = state.tasks.filter((task) => task.status !== "deleted");
+				return {
+					state: {
+						tasks: state.tasks.map((task) => task.status === "deleted" ? task : { ...task, status: "deleted" }),
+						nextId: state.nextId,
+					},
+					op: {
+						kind: "delete_batch",
+						deletedTasks: activeTasks.map(({ id, subject }) => ({ id, subject })),
+						all: true,
+					},
+				};
+			}
+			if (Array.isArray(params.id)) return deleteTaskBatch(state, params.id);
+			if (typeof params.id !== "number") return errorResult(state, "delete id must be a number, number array, or all");
 			const idx = state.tasks.findIndex((t) => t.id === params.id);
 			if (idx === -1) return errorResult(state, `#${params.id} not found`);
 			const current = state.tasks[idx];
@@ -279,12 +368,6 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 			};
 		}
 
-		case "clear": {
-			const count = state.tasks.length;
-			return {
-				state: { tasks: [], nextId: 1 },
-				op: { kind: "clear", count },
-			};
-		}
+
 	}
 }

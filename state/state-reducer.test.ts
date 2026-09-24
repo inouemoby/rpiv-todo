@@ -53,6 +53,63 @@ describe("applyTaskMutation — create", () => {
 	});
 });
 
+describe("applyTaskMutation — create batch via create", () => {
+	it("creates a batch in order and allows dependencies on earlier batch items", () => {
+		const state = emptyState();
+		const result = applyTaskMutation(state, "create", {
+			tasks: [
+				{ subject: "parent" },
+				{ subject: "child", blockedBy: [1], description: "waits for parent" },
+			],
+		});
+
+		expect(result.op).toEqual({ kind: "create_batch", taskIds: [1, 2] });
+		expect(result.state.tasks).toMatchObject([
+			{ id: 1, subject: "parent", status: "pending" },
+			{ id: 2, subject: "child", status: "pending", blockedBy: [1], description: "waits for parent" },
+		]);
+		expect(result.state.nextId).toBe(3);
+		expect(state.tasks).toEqual([]);
+		expect(state.nextId).toBe(1);
+	});
+
+	it("rejects an invalid item without committing earlier items", () => {
+		const state = emptyState();
+		const result = applyTaskMutation(state, "create", {
+			tasks: [{ subject: "valid" }, { subject: "   " }],
+		});
+
+		expect(result.op).toEqual({ kind: "error", message: "tasks[1].subject required for batch create" });
+		expect(result.state).toBe(state);
+	});
+
+	it("rejects dependencies that are missing or point to later batch items atomically", () => {
+		const state = emptyState();
+		const result = applyTaskMutation(state, "create", {
+			tasks: [{ subject: "first", blockedBy: [2] }, { subject: "second" }],
+		});
+
+		expect(result.op).toEqual({ kind: "error", message: "tasks[0].blockedBy: #2 not found" });
+		expect(result.state).toBe(state);
+	});
+
+	it("rejects mixed single-task and batch parameters", () => {
+		const result = applyTaskMutation(emptyState(), "create", { subject: "one", tasks: [{ subject: "two" }] });
+		expect(result.op).toEqual({ kind: "error", message: "create accepts either one task or tasks[], not both" });
+	});
+
+	it("rejects empty and oversized batches", () => {
+		expect(applyTaskMutation(emptyState(), "create", { tasks: [] }).op).toEqual({
+			kind: "error",
+			message: "tasks must contain at least one item for batch create",
+		});
+		expect(applyTaskMutation(emptyState(), "create", { tasks: Array.from({ length: 101 }, () => ({ subject: "x" })) }).op).toEqual({
+			kind: "error",
+			message: "create supports at most 100 tasks per batch",
+		});
+	});
+});
+
 describe("applyTaskMutation — update", () => {
 	it("rejects id-only update", () => {
 		const state = stateWith(task({ id: 1, subject: "x" }));
@@ -250,7 +307,7 @@ describe("applyTaskMutation — update", () => {
 	});
 });
 
-describe("applyTaskMutation — list/get/delete/clear", () => {
+describe("applyTaskMutation — list/get/delete", () => {
 	it("list emits Op with includeDeleted flag and optional statusFilter", () => {
 		const state = stateWith(
 			task({ id: 1, subject: "a", status: "pending" }),
@@ -274,12 +331,67 @@ describe("applyTaskMutation — list/get/delete/clear", () => {
 		expect(result.state.tasks[0].status).toBe("deleted");
 	});
 
-	it("clear emits Op with prior count and resets nextId to 1", () => {
-		const state = stateWith(task({ id: 5, subject: "x" }));
-		const result = applyTaskMutation(state, "clear", {});
-		expect(result.op).toEqual({ kind: "clear", count: 1 });
-		expect(result.state.tasks).toHaveLength(0);
-		expect(result.state.nextId).toBe(1);
+	it("delete accepts an id array and tombstones all requested tasks atomically", () => {
+		const state = stateWith(
+			task({ id: 1, subject: "one" }),
+			task({ id: 2, subject: "keep", status: "in_progress" }),
+			task({ id: 3, subject: "three", status: "completed" }),
+		);
+		const result = applyTaskMutation(state, "delete", { id: [3, 1] });
+		expect(result.op).toEqual({
+			kind: "delete_batch",
+			deletedTasks: [{ id: 3, subject: "three" }, { id: 1, subject: "one" }],
+		});
+		expect(result.state.tasks.map((t) => t.status)).toEqual(["deleted", "in_progress", "deleted"]);
+		expect(result.state.nextId).toBe(state.nextId);
+		expect(state.tasks.map((t) => t.status)).toEqual(["pending", "in_progress", "completed"]);
+	});
+
+	it("delete with an id array rejects the whole request when an id is invalid", () => {
+		const state = stateWith(task({ id: 1, subject: "one" }));
+		const result = applyTaskMutation(state, "delete", { id: [1, 99] });
+		expect(result.op).toEqual({ kind: "error", message: "#99 not found" });
+		expect(result.state).toBe(state);
+	});
+
+	it("delete rejects duplicate, tombstoned, empty, and oversized id arrays", () => {
+		const state = stateWith(task({ id: 1, subject: "one" }), task({ id: 2, subject: "old", status: "deleted" }));
+		expect(applyTaskMutation(state, "delete", { id: [1, 1] }).op).toEqual({
+			kind: "error",
+			message: "duplicate id #1 in batch delete",
+		});
+		expect(applyTaskMutation(state, "delete", { id: [2] }).op).toEqual({
+			kind: "error",
+			message: "#2 is already deleted",
+		});
+		expect(applyTaskMutation(state, "delete", { id: [] }).op).toEqual({
+			kind: "error",
+			message: "id array must contain at least one id for batch delete",
+		});
+		expect(applyTaskMutation(state, "delete", { id: Array.from({ length: 101 }, (_, i) => i + 10) }).op).toEqual({
+			kind: "error",
+			message: "delete supports at most 100 ids per batch",
+		});
+	});
+
+	it("delete with id all tombstones every active task and preserves ids/history", () => {
+		const state = stateWith(task({ id: 5, subject: "x" }), task({ id: 6, subject: "old", status: "deleted" }));
+		const result = applyTaskMutation(state, "delete", { id: "all" });
+		expect(result.op).toEqual({ kind: "delete_batch", deletedTasks: [{ id: 5, subject: "x" }], all: true });
+		expect(result.state.tasks.map((task) => [task.id, task.status])).toEqual([[5, "deleted"], [6, "deleted"]]);
+		expect(result.state.nextId).toBe(state.nextId);
+	});
+
+	it("update and get still require one numeric id", () => {
+		const state = stateWith(task({ id: 1, subject: "one" }));
+		expect(applyTaskMutation(state, "update", { id: [1], subject: "changed" }).op).toEqual({
+			kind: "error",
+			message: "update requires one numeric id",
+		});
+		expect(applyTaskMutation(state, "get", { id: "all" }).op).toEqual({
+			kind: "error",
+			message: "get requires one numeric id",
+		});
 	});
 
 	it("get emits Op with the resolved task", () => {

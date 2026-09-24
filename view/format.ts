@@ -36,8 +36,8 @@ export const STATUS_COLOR: Record<TaskStatus, "dim" | "warning" | "success" | "e
 };
 
 /**
- * Per-action prefix glyph for renderCall. `+` create, `→` update, `×` delete,
- * `›` get, `☰` list, `∅` clear..
+ * Per-action prefix glyph for renderCall. Batch create/delete reuse their
+ * existing action glyphs; deleting all uses the delete glyph as well.
  */
 export const ACTION_GLYPH: Record<TaskAction, string> = {
 	create: "+",
@@ -45,7 +45,6 @@ export const ACTION_GLYPH: Record<TaskAction, string> = {
 	delete: "×",
 	get: "›",
 	list: "☰",
-	clear: "∅",
 };
 
 /**
@@ -125,12 +124,17 @@ export function renderTodoCall(
 	const glyph = ACTION_GLYPH[args.action] ?? args.action;
 	let text = theme.fg("toolTitle", theme.bold("todo ")) + theme.fg("muted", glyph);
 
-	if (args.action === "create" && args.subject) {
-		text += ` ${theme.fg("dim", sanitizeTerminalText(args.subject))}`;
-	} else if (
-		(args.action === "update" || args.action === "get" || args.action === "delete") &&
-		args.id !== undefined
-	) {
+	if (args.action === "create") {
+		if (args.tasks) text += ` ${theme.fg("dim", `${args.tasks.length} tasks`)}`;
+		else if (args.subject) text += ` ${theme.fg("dim", sanitizeTerminalText(args.subject))}`;
+	} else if (args.action === "delete") {
+		if (Array.isArray(args.id)) text += ` ${theme.fg("dim", `${args.id.length} tasks`)}`;
+		else if (args.id === "all") text += ` ${theme.fg("dim", "all tasks")}`;
+		else if (typeof args.id === "number") {
+			const subject = selectTaskSubjectById(state, args.id);
+			text += ` ${theme.fg("accent", subject ? sanitizeTerminalText(subject) : `#${args.id}`)}`;
+		}
+	} else if ((args.action === "update" || args.action === "get") && typeof args.id === "number") {
 		const subject = selectTaskSubjectById(state, args.id);
 		text += ` ${theme.fg("accent", subject ? sanitizeTerminalText(subject) : `#${args.id}`)}`;
 	} else if (args.action === "list" && args.status) {
@@ -141,28 +145,28 @@ export function renderTodoCall(
 
 /**
  * `renderResult` body. Inspects `details` to pick the per-action status echo
- * (only `create`/`update`/`delete` advertise a status; `list`/`get`/`clear`
+ * (`create`/`update`/`delete` advertise a status; `list`/`get` and deleting all
  * fall back to plain `✓`). Identical visual output to pre-refactor
  * `todo.ts:533-565`.
  */
 export function renderTodoResult(result: { details?: unknown }, theme: Theme): Text {
 	const details = result.details as TaskDetails | undefined;
 	let status: TaskStatus | undefined;
-	if (details) {
+	if (details && !details.error) {
 		const params = details.params as TaskMutationParams;
 		switch (details.action) {
 			case "create":
-				status = details.tasks[details.tasks.length - 1]?.status;
+				status = params.tasks?.length ? "pending" : details.tasks[details.tasks.length - 1]?.status;
 				break;
 			case "update":
-				status = params.status ?? details.tasks.find((t) => t.id === params.id)?.status;
+				status = params.status ?? (typeof params.id === "number" ? details.tasks.find((t) => t.id === params.id)?.status : undefined);
 				break;
 			case "delete":
-				status = details.tasks.find((t) => t.id === params.id)?.status;
+				if (Array.isArray(params.id)) status = "deleted";
+				else if (typeof params.id === "number") status = details.tasks.find((t) => t.id === params.id)?.status;
 				break;
 			case "list":
 			case "get":
-			case "clear":
 				break;
 		}
 	}

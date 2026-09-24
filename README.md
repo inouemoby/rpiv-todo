@@ -51,6 +51,10 @@ by status.
 - **Tasks survive `/reload` and compaction.** Each tool call carries the full
   post-mutation snapshot, and the list is replayed from the session branch. No
   disk writes, nothing to lose.
+- **Batch operations reuse the existing actions.** `create` accepts either one
+  task or a `tasks` array (up to 100), and `delete` accepts one numeric `id`, an
+  array of ids, or `"all"` in that same `id` field. `"all"` tombstones all
+  active tasks while preserving history and the id counter.
 - **In-progress tasks get a low-priority nudge.** After a completed run, if an
   `in_progress` task remains and no other message is queued, the extension sends
   one user follow-up asking the agent to continue, including each task's ID,
@@ -69,6 +73,23 @@ by status.
 - **Localized UI, no setup required.** Nine locales ship with the package and
   activate when [`@juicesharp/rpiv-i18n`](https://www.npmjs.com/package/@juicesharp/rpiv-i18n)
   is installed; without it, everything falls back to English.
+
+## Suggested TODO workflow
+
+This is reference guidance for people using the extension; it is not injected into
+Pi's prompt.
+
+- Define the actual deliverables, authorization, and decisions needed before
+  creating tasks. Ask first if a required boundary is unclear.
+- Use `todo` for work with three or more steps or when the user gives multiple
+  tasks.
+- Mark a task `in_progress` before starting it and `completed` as soon as it is
+  done. Keep only one task `in_progress` at a time.
+- If work is blocked or validation fails, investigate, fix, and try reasonable
+  alternatives; do not mark unresolved work `completed`.
+- Mark a specific task `failed` only after reasonable implementation,
+  debugging, investigation, and alternative approaches still cannot move it
+  forward. Use `todo({ action: "update", id, status: "failed" })`.
 
 ## Configuration
 

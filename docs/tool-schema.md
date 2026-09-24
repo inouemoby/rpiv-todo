@@ -8,24 +8,33 @@ for the `todo` tool registered by
 
 | Action | Required params | What it does |
 | --- | --- | --- |
-| `create` | `subject` | Adds a task in `pending`, assigns the next id. |
-| `update` | `id` + at least one mutable field | Changes status, fields, or dependencies. |
+| `create` | `subject` or `tasks` | Adds one pending task or atomically adds a batch of up to 100. |
+| `update` | numeric `id` + at least one mutable field | Changes status, fields, or dependencies. |
 | `list` | — | Returns all tasks, optionally filtered by `status`. |
-| `get` | `id` | Returns one task with its `blockedBy` and reverse `blocks` edges. |
-| `delete` | `id` | Tombstones the task (`status: "deleted"`); it is not removed. |
-| `clear` | — | Drops every task and resets the id counter to `1`. |
+| `get` | numeric `id` | Returns one task with its `blockedBy` and reverse `blocks` edges. |
+| `delete` | `id` | Tombstones one id, an id array, or all active tasks through the same parameter. |
 
 ## Parameters
 
 ```ts
 todo({
-  action: "create" | "update" | "list" | "get" | "delete" | "clear",
+  action: "create" | "update" | "list" | "get" | "delete",
 
   // create-only
   subject?: string,                   // required for create
   blockedBy?: number[],               // initial dependency ids
 
-  // create + update
+  // create batch (same create action)
+  tasks?: Array<{                      // 1–100 items; each requires subject
+    subject: string,
+    description?: string,
+    activeForm?: string,
+    blockedBy?: number[],              // existing ids or earlier items in this batch
+    owner?: string,
+    metadata?: Record<string, unknown>,
+  }>,
+
+  // create + update (batch-create fields are nested in tasks[])
   description?: string,               // long-form detail
   activeForm?: string,                // present-continuous label shown while in_progress
   owner?: string,                     // agent/owner assigned to this task
@@ -35,8 +44,8 @@ todo({
   addBlockedBy?: number[],            // additive merge into blockedBy
   removeBlockedBy?: number[],         // additive removal from blockedBy
 
-  // update / get / delete
-  id?: number,
+  // update / get / delete; delete accepts a number, a number[], or "all"
+  id?: number | number[] | "all",
 
   // update (sets this task's status) or list (filters by status)
   status?: "pending" | "in_progress" | "completed" | "failed" | "deleted",
@@ -50,6 +59,14 @@ todo({
 for a key removes it, and emptying the record drops the field entirely.
 `addBlockedBy` and `removeBlockedBy` are additive — do not resend the whole
 array.
+
+`create` with `tasks` validates all 1–100 items before committing any, and
+assigns ids in input order. `blockedBy` may refer to existing tasks or earlier
+items in the same batch. `delete` with an id array requires 1–100 unique, active
+ids and validates the whole array before tombstoning any task. `delete` with
+`id: "all"` tombstones every active task while retaining existing tombstones and
+the current id counter. All deletion forms share the existing `delete` action
+and `id` parameter; there is no separate clear action.
 
 ## Status transitions
 
@@ -77,6 +94,7 @@ is mutated, so a rejected call leaves the list untouched:
 - blocking a task on itself is rejected;
 - an `addBlockedBy` that would close a cycle in the graph is rejected;
 - a failed task cannot be added as a prerequisite.
+- a batch create accepts dependencies on existing tasks or earlier items in its own `tasks` array; later items are not visible yet.
 
 A task may enter `in_progress` or `completed` only when every task in its
 `blockedBy` list is completed. This prevents starting downstream work before its
@@ -123,7 +141,9 @@ survive `/reload` and compaction without any disk writes.
 | Updated without a status change | `Updated #3` |
 | Update that changed nothing | `No change: #3 already matches the requested values (status: in_progress)` |
 | Deleted | `Deleted #3: Write the parser` |
-| Cleared | `Cleared 7 tasks` |
+| Batch created through `create` | `Created 2 tasks:` followed by each new id and subject |
+| Batch deleted through `delete` | `Deleted 2 tasks:` followed by each id and subject |
+| `delete` with `id: "all"` | `Deleted all 7 tasks` (active tasks become tombstones) |
 | `list` row | `[in_progress] #3 Write the parser (writing the parser) ⛓ #1,#2` |
 | `list` with nothing to show | `No tasks` |
 | Any rejection | `Error: <message>` |
@@ -136,10 +156,18 @@ that it was a no-op instead of a fresh `Updated #N`.
 | Message | Cause |
 | --- | --- |
 | `subject required for create` | `create` without a non-blank `subject`. |
+| `create accepts either one task or tasks[], not both` | A call mixes single-task fields with a batch. |
+| `tasks must contain at least one item for batch create` | `create` receives an empty `tasks` array. |
+| `tasks[N].subject required for batch create` | A batch item has a missing or blank subject. |
+| `create supports at most 100 tasks per batch` | The create batch exceeds the supported limit. |
+| `id array must contain at least one id for batch delete` | `delete` receives an empty id array. |
+| `duplicate id #N in batch delete` | An id appears more than once in the delete array. |
+| `delete supports at most 100 ids per batch` | The delete array exceeds the supported limit. |
 | `blockedBy: #N not found` | `create` naming an unknown dependency. |
 | `blockedBy: #N is deleted` | `create` naming a tombstoned dependency. |
+| `tasks[N].blockedBy: #M not found` / `is deleted` / `is failed` | A batch-created task has an invalid prerequisite. |
 | `id required for update` / `get` / `delete` | `id` omitted. |
-| `#N not found` | No task with that id. |
+| `#N not found` | No task with that id, including an id in a delete array. |
 | `update requires at least one mutable field: subject, description, activeForm, status, owner, metadata, addBlockedBy, or removeBlockedBy` | `update` with only an `id`. |
 | `illegal transition completed → in_progress` | Target status not reachable from the current one. |
 | `#N is blocked by unfinished task(s): …` | A task is being started/completed, or given a new prerequisite, before all prerequisites are completed. |
@@ -147,7 +175,9 @@ that it was a no-op instead of a fresh `Updated #N`.
 | `cannot block #N on itself` | `addBlockedBy` includes the task's own id. |
 | `addBlockedBy: #N not found` / `is deleted` | Unknown or tombstoned dependency. |
 | `addBlockedBy would create a cycle in the blockedBy graph` | The edge would close a cycle. |
-| `#N is already deleted` | `delete` on a tombstone. |
+| `#N is already deleted` | `delete` or its id array includes a tombstone. |
+| `delete id must be a number, number array, or all` | `delete` receives an unsupported id value. |
+| `update requires one numeric id` / `get requires one numeric id` | A non-scalar id is passed to `update` or `get`. |
 
 Errors are returned in-band: `content` carries `Error: …` and `details.error`
 carries the bare message. Task state is unchanged.
@@ -155,10 +185,10 @@ carries the bare message. Task state is unchanged.
 ## Prompt guidance
 
 The tool ships a `promptSnippet` and `promptGuidelines` telling the model when
-to open a list, to keep exactly one task `in_progress`, to mark work completed
-immediately rather than in batches, how `failed` cascades only through dependent
-tasks, and the literal `update {id, status}` call shape for changing a task's
-status. A task cannot start or complete before its prerequisites are completed.
+to open a list, to keep exactly one task `in_progress`, to pass multiple create
+records in `create.tasks`, to target one/many/all tasks through `delete.id`, to
+mark work completed immediately rather than in batches, how `failed` cascades
+only through dependent tasks, and the literal `update {id, status}` call shape. A task cannot start or complete before its prerequisites are completed.
 Both are overridable — see
 [configuration.md](./configuration.md#guidance).
 

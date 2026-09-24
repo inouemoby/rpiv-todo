@@ -25,7 +25,7 @@ export const MSG_NO_TODOS = "No todos yet. Ask the agent to add some!";
 
 export type TaskStatus = "pending" | "in_progress" | "completed" | "failed" | "deleted";
 
-export type TaskAction = "create" | "update" | "list" | "get" | "delete" | "clear";
+export type TaskAction = "create" | "update" | "list" | "get" | "delete";
 
 export interface Task {
 	id: number;
@@ -37,6 +37,17 @@ export interface Task {
 	owner?: string;
 	metadata?: Record<string, unknown>;
 }
+
+export interface NewTaskInput {
+	subject: string;
+	description?: string;
+	activeForm?: string;
+	blockedBy?: number[];
+	owner?: string;
+	metadata?: Record<string, unknown>;
+}
+
+export const MAX_BATCH_SIZE = 100;
 
 /**
  * Persistence + replay snapshot. Every successful `todo` tool call returns this
@@ -68,8 +79,9 @@ export interface TaskMutationParams {
 	removeBlockedBy?: number[];
 	owner?: string;
 	metadata?: Record<string, unknown>;
-	id?: number;
+	id?: number | number[] | "all";
 	includeDeleted?: boolean;
+	tasks?: NewTaskInput[];
 }
 
 // ---------------------------------------------------------------------------
@@ -78,7 +90,9 @@ export interface TaskMutationParams {
 // ---------------------------------------------------------------------------
 
 export const TodoParamsSchema = Type.Object({
-	action: StringEnum(["create", "update", "list", "get", "delete", "clear"] as const),
+	action: StringEnum(
+		["create", "update", "list", "get", "delete"] as const,
+	),
 	subject: Type.Optional(Type.String({ description: "Task subject line (required for create)" })),
 	description: Type.Optional(Type.String({ description: "Long-form task description" })),
 	activeForm: Type.Optional(
@@ -94,8 +108,25 @@ export const TodoParamsSchema = Type.Object({
 	),
 	blockedBy: Type.Optional(
 		Type.Array(Type.Number(), {
-			description: "Initial blockedBy ids (create only)",
+			description: "Initial dependency ids (create only)",
 		}),
+	),
+	tasks: Type.Optional(
+		Type.Array(
+			Type.Object({
+				subject: Type.String({ description: "Task subject line (required, non-blank)" }),
+				description: Type.Optional(Type.String({ description: "Long-form task description" })),
+				activeForm: Type.Optional(Type.String({ description: "Present-continuous label shown while in_progress" })),
+				blockedBy: Type.Optional(Type.Array(Type.Number(), { description: "Initial dependency ids" })),
+				owner: Type.Optional(Type.String({ description: "Agent/owner assigned to this task" })),
+				metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Arbitrary metadata" })),
+			}),
+			{
+				minItems: 1,
+				maxItems: MAX_BATCH_SIZE,
+				description: "Task records to add atomically with create (maximum 100).",
+			},
+		),
 	),
 	addBlockedBy: Type.Optional(
 		Type.Array(Type.Number(), {
@@ -114,9 +145,20 @@ export const TodoParamsSchema = Type.Object({
 		}),
 	),
 	id: Type.Optional(
-		Type.Number({
-			description: "Task id (required for update, get, delete)",
-		}),
+		Type.Union(
+			[
+				Type.Number(),
+				Type.Array(Type.Number(), {
+					minItems: 1,
+					maxItems: MAX_BATCH_SIZE,
+					description: "Task ids to delete atomically (maximum 100).",
+				}),
+				Type.Literal("all"),
+			],
+			{
+				description: "Target id for update/get/delete. For delete, pass one number, an array of ids, or \"all\"; update/get require one number.",
+			},
+		),
 	),
 	includeDeleted: Type.Optional(
 		Type.Boolean({
