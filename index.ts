@@ -132,7 +132,7 @@ export default function (pi: ExtensionAPI, importOverlay: TodoOverlayImporter = 
 	let lifecycleGeneration = 0;
 
 	async function updateTodoOverlay(
-		resetCompletedDisplayState = false,
+		resetTerminalDisplayState = false,
 		generation = lifecycleGeneration,
 	): Promise<void> {
 		const hasVisibleTasks = getRenderState().tasks.some((task) => task.status !== "deleted");
@@ -143,7 +143,7 @@ export default function (pi: ExtensionAPI, importOverlay: TodoOverlayImporter = 
 
 		todoOverlay ??= new TodoOverlay();
 		todoOverlay.setUICtx(uiCtx);
-		if (resetCompletedDisplayState) todoOverlay.resetCompletedDisplayState();
+		if (resetTerminalDisplayState) todoOverlay.resetTerminalDisplayState();
 		todoOverlay.update();
 	}
 
@@ -285,6 +285,6 @@ export default function (pi: ExtensionAPI, importOverlay: TodoOverlayImporter = 
 	prewarmTimer.unref?.();
 
 	pi.on("agent_start", async () => {
-		todoOverlay?.hideCompletedTasksFromPreviousTurn();
+		todoOverlay?.hideTerminalTasksFromPreviousTurn();
 	});
 }

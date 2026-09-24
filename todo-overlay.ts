@@ -32,8 +32,8 @@ export class TodoOverlay {
 	private uiCtx: ExtensionUIContext | undefined;
 	private widgetRegistered = false;
 	private tui: TUI | undefined;
-	private completedTaskIdsPendingHide = new Set<number>();
-	private hiddenCompletedTaskIds = new Set<number>();
+	private terminalTaskIdsPendingHide = new Set<number>();
+	private hiddenTerminalTaskIds = new Set<number>();
 	private lastNextId: number | undefined;
 	private collapsed = false;
 
@@ -82,26 +82,36 @@ export class TodoOverlay {
 		}
 	}
 
-	resetCompletedDisplayState(): void {
-		this.completedTaskIdsPendingHide.clear();
-		this.hiddenCompletedTaskIds.clear();
+	resetTerminalDisplayState(): void {
+		this.terminalTaskIdsPendingHide.clear();
+		this.hiddenTerminalTaskIds.clear();
 		this.lastNextId = undefined;
 	}
 
-	hideCompletedTasksFromPreviousTurn(): void {
-		if (this.completedTaskIdsPendingHide.size === 0) return;
-		for (const taskId of this.completedTaskIdsPendingHide) {
-			this.hiddenCompletedTaskIds.add(taskId);
+	/** Backward-compatible alias; completed and failed are both terminal displays. */
+	resetCompletedDisplayState(): void {
+		this.resetTerminalDisplayState();
+	}
+
+	hideTerminalTasksFromPreviousTurn(): void {
+		if (this.terminalTaskIdsPendingHide.size === 0) return;
+		for (const taskId of this.terminalTaskIdsPendingHide) {
+			this.hiddenTerminalTaskIds.add(taskId);
 		}
-		this.completedTaskIdsPendingHide.clear();
+		this.terminalTaskIdsPendingHide.clear();
 		this.tui?.requestRender();
+	}
+
+	/** Backward-compatible alias; hides completed and failed rows. */
+	hideCompletedTasksFromPreviousTurn(): void {
+		this.hideTerminalTasksFromPreviousTurn();
 	}
 
 	toggleCollapse(): void {
 		this.collapsed = !this.collapsed;
 		// Forced full redraw on the collapsed↔expanded height step, mirroring the
 		// lane-dock's requestRender(shapeChanged); distinct from the non-forced
-		// requestRender() refresh paths in update()/hideCompletedTasksFromPreviousTurn().
+		// requestRender() refresh paths in update()/hideTerminalTasksFromPreviousTurn().
 		this.tui?.requestRender(true);
 	}
 
@@ -112,27 +122,27 @@ export class TodoOverlay {
 	private getSnapshot() {
 		const state = getRenderState();
 		if (this.lastNextId !== undefined && state.nextId < this.lastNextId) {
-			this.resetCompletedDisplayState();
+			this.resetTerminalDisplayState();
 		}
 		this.lastNextId = state.nextId;
-		const completedTaskIds = new Set(
-			state.tasks.filter((task) => task.status === "completed").map((task) => task.id),
+		const terminalTaskIds = new Set(
+			state.tasks.filter((task) => task.status === "completed" || task.status === "failed").map((task) => task.id),
 		);
-		for (const taskId of this.completedTaskIdsPendingHide) {
-			if (!completedTaskIds.has(taskId)) this.completedTaskIdsPendingHide.delete(taskId);
+		for (const taskId of this.terminalTaskIdsPendingHide) {
+			if (!terminalTaskIds.has(taskId)) this.terminalTaskIdsPendingHide.delete(taskId);
 		}
-		for (const taskId of this.hiddenCompletedTaskIds) {
-			if (!completedTaskIds.has(taskId)) this.hiddenCompletedTaskIds.delete(taskId);
+		for (const taskId of this.hiddenTerminalTaskIds) {
+			if (!terminalTaskIds.has(taskId)) this.hiddenTerminalTaskIds.delete(taskId);
 		}
 		return { tasks: [...state.tasks], nextId: state.nextId };
 	}
 
 	private selectOverlayTasks(snapshot: ReturnType<TodoOverlay["getSnapshot"]>) {
-		return snapshot.tasks.filter((task) => task.status !== "deleted" && !this.shouldHideCompletedTask(task));
+		return snapshot.tasks.filter((task) => task.status !== "deleted" && !this.shouldHideTerminalTask(task));
 	}
 
-	private shouldHideCompletedTask(task: ReturnType<TodoOverlay["getSnapshot"]>["tasks"][number]): boolean {
-		return task.status === "completed" && this.hiddenCompletedTaskIds.has(task.id);
+	private shouldHideTerminalTask(task: ReturnType<TodoOverlay["getSnapshot"]>["tasks"][number]): boolean {
+		return (task.status === "completed" || task.status === "failed") && this.hiddenTerminalTaskIds.has(task.id);
 	}
 
 	private renderWidget(theme: Theme, width: number): string[] {
@@ -152,7 +162,7 @@ export class TodoOverlay {
 		const heading = truncate(`${theme.fg(headingColor, headingIcon)} ${theme.fg(headingColor, headingText)}`);
 
 		// Collapsed view: just the heading + a dim "└─" expand hint, then the
-		// trailing spacer. Short-circuit before the budget math and the completed-
+		// trailing spacer. Short-circuit before the budget math and the terminal-
 		// display tracking — nothing is shown to track, and skipping the tracking
 		// when nothing is rendered is correctness, not optimization. The hint splices
 		// the resolved key into the {key} placeholder (per-render, like the row
@@ -181,28 +191,34 @@ export class TodoOverlay {
 			lines.push(truncate(`${theme.fg("dim", "├─")} ${formatOverlayTaskLine(task, theme, showIds)}`));
 		}
 
-		const newlyDisplayedCompletedTaskIds = overlayTasks
+		const newlyDisplayedTerminalTaskIds = overlayTasks
 			.filter(
 				(task) =>
-					task.status === "completed" &&
-					!this.completedTaskIdsPendingHide.has(task.id) &&
-					!this.hiddenCompletedTaskIds.has(task.id),
+					(task.status === "completed" || task.status === "failed") &&
+					!this.terminalTaskIdsPendingHide.has(task.id) &&
+					!this.hiddenTerminalTaskIds.has(task.id),
 			)
 			.map((task) => task.id);
-		for (const taskId of newlyDisplayedCompletedTaskIds) {
-			this.completedTaskIdsPendingHide.add(taskId);
+		for (const taskId of newlyDisplayedTerminalTaskIds) {
+			this.terminalTaskIdsPendingHide.add(taskId);
 		}
 
-		if (layout.hiddenCompleted === 0 && layout.truncatedTail === 0) {
+		if (layout.hiddenCompleted === 0 && layout.hiddenFailed === 0 && layout.truncatedTail === 0) {
 			const last = lines.length - 1;
 			lines[last] = lines[last].replace("├─", "└─");
 			return this.withTrailingSpacer(lines);
 		}
 
-		const totalHidden = layout.hiddenCompleted + layout.truncatedTail;
+		const totalHidden = layout.hiddenCompleted + layout.hiddenFailed + layout.truncatedTail;
 		const overflowParts: string[] = [];
 		if (layout.hiddenCompleted > 0) overflowParts.push(`${layout.hiddenCompleted} ${formatStatusLabel("completed")}`);
-		if (layout.truncatedTail > 0) overflowParts.push(`${layout.truncatedTail} ${formatStatusLabel("pending")}`);
+		if (layout.hiddenFailed > 0) overflowParts.push(`${layout.hiddenFailed} ${formatStatusLabel("failed")}`);
+		if (layout.truncatedByStatus.inProgress > 0) {
+			overflowParts.push(`${layout.truncatedByStatus.inProgress} ${formatStatusLabel("in_progress")}`);
+		}
+		if (layout.truncatedByStatus.pending > 0) {
+			overflowParts.push(`${layout.truncatedByStatus.pending} ${formatStatusLabel("pending")}`);
+		}
 		const more = t("overlay.more", OVERLAY_MORE);
 		const summary =
 			overflowParts.length > 0 ? `+${totalHidden} ${more} (${overflowParts.join(", ")})` : `+${totalHidden} ${more}`;
@@ -229,6 +245,6 @@ export class TodoOverlay {
 		this.tui = undefined;
 		this.uiCtx = undefined;
 		this.collapsed = false;
-		this.resetCompletedDisplayState();
+		this.resetTerminalDisplayState();
 	}
 }

@@ -54,7 +54,9 @@ export function formatContent(op: Op, state: TaskState): string {
 				return `No change: #${op.id} already matches the requested values (status: ${op.toStatus})`;
 			}
 			const transition = op.fromStatus !== op.toStatus ? ` (${op.fromStatus} → ${op.toStatus})` : "";
-			return `Updated #${op.id}${transition}`;
+			const updated = `Updated #${op.id}${transition}`;
+			if (!op.failedDependentIds?.length) return updated;
+			return `${updated}; failed dependent tasks: ${op.failedDependentIds.map((id) => `#${id}`).join(", ")}`;
 		}
 		case "delete":
 			return `Deleted #${op.id}: ${sanitizeTerminalText(op.subject)}`;

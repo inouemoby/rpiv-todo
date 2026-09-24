@@ -36,8 +36,9 @@ and taking the last `todo` tool result's snapshot, which replaces the whole list
 - **Heading** — `● Todos (done/total)` in the accent color while any task is
   `pending` or `in_progress`; `○ Todos (done/total)` dimmed once everything is
   completed.
-- **Glyphs** — `○` pending, `◐` in_progress, `✓` completed, `✗` deleted.
-  Completed and deleted subjects render dim and struck through.
+- **Glyphs** — `○` pending, `◐` in_progress, `✓` completed, `✗` failed.
+  Completed subjects are muted and struck through; failed subjects are error-colored
+  and struck through. Deleted tombstones are omitted from the overlay.
 - **activeForm** — appended dim in parentheses, only while the task is
   `in_progress`.
 - **Dependencies** — appended as `⛓ #1,#2` when the task has a `blockedBy` set.
@@ -55,11 +56,11 @@ The content-row budget is `maxWidgetLines` (default `12`), and the heading count
 against it. When there are more tasks than fit:
 
 1. one row is reserved for the summary line;
-2. completed tasks are dropped first, newest first — the oldest completed rows
-   are the last completed rows to go;
-3. if the unfinished tasks alone still overflow, the tail of that list is
-   truncated;
-4. the last row becomes `+N more (X completed, Y pending)`.
+2. completed and failed tasks are dropped before pending/in-progress work;
+3. if the non-terminal tasks still overflow, their tail is truncated;
+4. the last row reports hidden counts by status, for example
+   `+3 more (1 completed, 1 failed, 1 pending)`. Failed remains a distinct result,
+   not a completed status.
 
 Use Pi's tool-output expansion shortcut (`ctrl+o` by default) to expand the
 widget and show every task. Collapsing Pi's tool output reapplies the configured
@@ -67,12 +68,13 @@ row budget. Unfinished work is therefore the last thing to disappear in the
 compact view. See [configuration.md](./configuration.md#maxwidgetlines) for the
 budget's floor and reload semantics.
 
-## Completed tasks fading out
+## Completed and failed tasks fading out
 
-A completed task stays on screen for the remainder of the turn in which it was
-completed. At the start of the next agent turn, every completed row that has
-already been displayed is hidden from later renders. Reloading or compacting the
-session resets that tracking, so a fresh session shows the full list again.
+A completed or failed task stays on screen for the remainder of the turn in which
+its status was set. At the start of the next agent turn, those terminal rows are
+hidden from the overlay. This only affects the panel: `/todos` still lists the
+stored completed and failed tasks. Reloading or compacting the session resets the
+panel's hide tracking, so a fresh session shows them again.
 
 ## Collapsing
 
@@ -91,7 +93,7 @@ label rather than advertising an unbindable key.
 row budget and auto-hiding:
 
 ```
-2/7 completed · 1 in progress · 4 pending
+1 failed · 2/8 completed · 1 in progress · 4 pending
 ── Pending ──
   ○ #4 Register DI bindings
   ○ #5 Add integration tests    ⛓ #4
@@ -102,6 +104,8 @@ row budget and auto-hiding:
 ── Completed ──
   ✓ #1 Create DemoTodo domain entity
   ✓ #2 Create IDemoTodoRepository interface
+── Failed ──
+  ✗ #8 Generate API client
 ```
 
 The header omits any count that is zero. Sections appear only when they have

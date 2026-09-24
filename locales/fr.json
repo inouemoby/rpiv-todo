@@ -4,6 +4,7 @@
   "status.pending": "en attente",
   "status.in_progress": "en cours",
   "status.completed": "terminées",
+  "status.failed": "échouées",
   "status.deleted": "supprimée",
 
   "overlay.heading": "Tâches",
@@ -15,5 +16,6 @@
   "command.requires_interactive": "/todos nécessite le mode interactif",
   "command.section.pending": "── En attente ──",
   "command.section.in_progress": "── En cours ──",
-  "command.section.completed": "── Terminées ──"
+  "command.section.completed": "── Terminées ──",
+  "command.section.failed": "── Échouées ──"
 }

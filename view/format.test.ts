@@ -42,6 +42,12 @@ describe("formatOverlayTaskLine — semantic color hierarchy", () => {
 			"<success>✓</success> <strike><muted>quiet task</muted></strike>",
 		);
 	});
+
+	it("renders failed tasks with an error glyph and struck-through subject", () => {
+		expect(formatOverlayTaskLine(task({ status: "failed" }), recordingTheme, false)).toBe(
+			"<error>✗</error> <strike><error>quiet task</error></strike>",
+		);
+	});
 });
 
 describe("formatOverlayTaskLine — terminal control characters", () => {

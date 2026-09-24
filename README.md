@@ -51,15 +51,15 @@ by status.
 - **Tasks survive `/reload` and compaction.** Each tool call carries the full
   post-mutation snapshot, and the list is replayed from the session branch. No
   disk writes, nothing to lose.
-- **Finished work gets out of the way.** Completed rows stay visible for the rest
-  of the turn, then drop at the start of the next one; the panel disappears
-  entirely when the list empties.
+- **Finished outcomes get out of the way.** Completed and failed rows stay
+  visible for the rest of the turn, then disappear from the overlay at the start
+  of the next one. Their statuses remain available through `/todos`.
 - **The overlay never eats your terminal.** Past the row budget it drops
-  completed tasks first, truncates unfinished ones last, and tells you what it
-  hid with `+3 more (2 completed, 1 pending)`.
+  completed and failed tasks before unfinished work, then reports hidden counts.
 - **The agent can sequence work, not just list it.** `blockedBy` dependencies are
-  validated before anything is written — dangling ids, deleted dependencies,
-  self-blocks, and cycles are all rejected.
+  validated before anything is written — dangling ids, deleted/failed
+  dependencies, self-blocks, and cycles are rejected. A failed task also fails
+  its dependent tasks.
 - **Parallel sessions stay separate.** Task state is keyed by session, so a
   detached or child session can neither read nor overwrite the foreground list.
 - **Localized UI, no setup required.** Nine locales ship with the package and

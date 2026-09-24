@@ -98,5 +98,6 @@ describe("i18n soft-peer shim — runtime fallback contract", () => {
 		}
 		expect(scopeImpl("any.key", "literal fallback")).toBe("literal fallback");
 		expect(scopeImpl("status.completed", "completed")).toBe("completed");
+		expect(scopeImpl("status.failed", "failed")).toBe("failed");
 	});
 });

@@ -44,6 +44,9 @@ describe("registerTodoTool — registration shape", () => {
 		for (const action of ["create", "update", "list", "get", "delete", "clear"]) {
 			expect(raw).toContain(action);
 		}
+		for (const status of ["pending", "in_progress", "completed", "failed", "deleted"]) {
+			expect(raw).toContain(status);
+		}
 	});
 });
 
@@ -147,6 +150,16 @@ describe("registerTodoTool — renderResult", () => {
 		const text = (node as unknown as { text: string }).text;
 		expect(text).toContain("deleted");
 		expect(text).toContain("⊘");
+	});
+
+	it("failed update renders the failure status glyph and label", async () => {
+		const { tool } = setup();
+		await call(tool, { action: "create", subject: "a" });
+		const r = await call(tool, { action: "update", id: 1, status: "failed" });
+		const node = tool.renderResult?.(r as never, {} as never, theme, undefined as never) as unknown as Text;
+		const text = (node as unknown as { text: string }).text;
+		expect(text).toContain("failed");
+		expect(text).toContain("✗");
 	});
 
 	it("list renders the plain '✓' fallback (no status leakage)", async () => {

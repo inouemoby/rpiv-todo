@@ -48,6 +48,7 @@ export const t: ScopeFn = scopeImpl;
 const STATUS_LABEL_PENDING = "pending";
 const STATUS_LABEL_IN_PROGRESS = "in progress";
 const STATUS_LABEL_COMPLETED = "completed";
+const STATUS_LABEL_FAILED = "failed";
 const STATUS_LABEL_DELETED = "deleted";
 
 export function formatStatusLabel(status: TaskStatus): string {
@@ -58,6 +59,8 @@ export function formatStatusLabel(status: TaskStatus): string {
 			return t("status.in_progress", STATUS_LABEL_IN_PROGRESS);
 		case "completed":
 			return t("status.completed", STATUS_LABEL_COMPLETED);
+		case "failed":
+			return t("status.failed", STATUS_LABEL_FAILED);
 		case "deleted":
 			return t("status.deleted", STATUS_LABEL_DELETED);
 	}

@@ -35,6 +35,7 @@ import { formatCommandTaskLine, renderTodoCall, renderTodoResult } from "./view/
 const SECTION_PENDING = "── Pending ──";
 const SECTION_IN_PROGRESS = "── In Progress ──";
 const SECTION_COMPLETED = "── Completed ──";
+const SECTION_FAILED = "── Failed ──";
 
 // ---------------------------------------------------------------------------
 // Public re-exports — existing consumers (overlay, tests, index.ts) keep
@@ -56,10 +57,10 @@ export const DEFAULT_PROMPT_SNIPPET = "Manage a task list to track multi-step pr
 export const DEFAULT_PROMPT_GUIDELINES: string[] = [
 	"Use `todo` for complex work with 3+ steps, when the user gives you a list of tasks, or immediately after receiving new instructions to capture requirements. Skip it for single trivial tasks and purely conversational requests.",
 	"When starting a task from the todo list, mark it in_progress BEFORE beginning work. Mark it completed IMMEDIATELY when done — never batch completions. Exactly one task in_progress at a time.",
-	"Never mark a task completed if tests are failing, the implementation is partial, or you hit unresolved errors — keep it in_progress and create a new task for the blocker instead.",
-	"Task status is a 4-state machine: pending → in_progress → completed, plus deleted as a tombstone. Pass activeForm (present-continuous label, e.g. 'researching existing tool') when marking in_progress.",
+	"Never mark a task completed if tests are failing, the implementation is partial, or you hit unresolved errors — keep it in_progress, mark it failed if it cannot be completed, and create a new task for the blocker instead.",
+	"Task status is a 5-state machine: pending → in_progress → completed, plus failed and deleted terminal outcomes. Pass activeForm (present-continuous label, e.g. 'researching existing tool') when marking in_progress.",
 	'To change a task\'s status, call update with the task id and the target status, e.g. {"action":"update","id":3,"status":"completed"} or {"action":"update","id":3,"status":"in_progress","activeForm":"writing tests"}. status is the field that changes the task; an update without a mutable field (status or another) is rejected.',
-	"Use blockedBy to express dependencies (A is blocked by B). On create, pass blockedBy as the initial set. On update, use addBlockedBy / removeBlockedBy (additive merge — do not resend the full array). Cycles are rejected.",
+	"Use blockedBy to express dependencies (A is blocked by B). On create, pass blockedBy as the initial set. On update, use addBlockedBy / removeBlockedBy (additive merge — do not resend the full array). Cycles are rejected; if a task fails, its dependent tasks fail too.",
 	"list hides tombstoned (deleted) tasks by default; pass includeDeleted:true to see them. Pass status to filter by a single status.",
 	"Subject must be short and imperative (e.g. 'Research existing tool'); description is for long-form detail. activeForm is a present-continuous label shown while in_progress.",
 ];
@@ -70,7 +71,7 @@ export function registerTodoTool(pi: ExtensionAPI): void {
 		name: TOOL_NAME,
 		label: TOOL_LABEL,
 		description:
-			"Manage a task list for tracking multi-step progress. Actions: create (new task), update (change status/fields/dependencies), list (all tasks, optionally filtered by status), get (single task details), delete (tombstone), clear (reset all). Status: pending → in_progress → completed, plus deleted tombstone. Use this to plan and track multi-step work like research, design, and implementation.",
+			"Manage a task list for tracking multi-step progress. Actions: create (new task), update (change status/fields/dependencies), list (all tasks, optionally filtered by status), get (single task details), delete (tombstone), clear (reset all). Status: pending → in_progress → completed, plus failed and deleted terminal outcomes. A failed task also fails tasks that depend on it. Use this to plan and track multi-step work like research, design, and implementation.",
 		promptSnippet: guidance.promptSnippet ?? DEFAULT_PROMPT_SNIPPET,
 		promptGuidelines: guidance.promptGuidelines ?? DEFAULT_PROMPT_GUIDELINES,
 		parameters: TodoParamsSchema,
@@ -121,6 +122,7 @@ export function registerTodosCommand(pi: ExtensionAPI): void {
 			const counts = selectTodoCounts(state);
 
 			const header: string[] = [];
+			if (counts.failed > 0) header.push(`${counts.failed} ${formatStatusLabel("failed")}`);
 			if (counts.completed > 0) header.push(`${counts.completed}/${counts.total} ${formatStatusLabel("completed")}`);
 			if (counts.inProgress > 0) header.push(`${counts.inProgress} ${formatStatusLabel("in_progress")}`);
 			if (counts.pending > 0) header.push(`${counts.pending} ${formatStatusLabel("pending")}`);
@@ -137,6 +139,10 @@ export function registerTodosCommand(pi: ExtensionAPI): void {
 			if (groups.completed.length > 0) {
 				lines.push(t("command.section.completed", SECTION_COMPLETED));
 				for (const task of groups.completed) lines.push(formatCommandTaskLine(task, "✓"));
+			}
+			if (groups.failed.length > 0) {
+				lines.push(t("command.section.failed", SECTION_FAILED));
+				for (const task of groups.failed) lines.push(formatCommandTaskLine(task, "✗"));
 			}
 
 			ctx.ui.notify(lines.join("\n"), "info");

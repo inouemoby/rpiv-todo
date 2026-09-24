@@ -11,6 +11,7 @@ describe("i18n-bridge", () => {
 				"status.pending": "pending",
 				"status.in_progress": "in progress",
 				"status.completed": "completed",
+				"status.failed": "failed",
 				"status.deleted": "deleted",
 			},
 			de: {
@@ -23,6 +24,7 @@ describe("i18n-bridge", () => {
 	it("returns English when no locale is active", () => {
 		expect(formatStatusLabel("in_progress")).toBe("in progress");
 		expect(formatStatusLabel("completed")).toBe("completed");
+		expect(formatStatusLabel("failed")).toBe("failed");
 	});
 
 	it("returns localized value when locale is set", () => {

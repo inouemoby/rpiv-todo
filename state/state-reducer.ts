@@ -1,7 +1,7 @@
 import type { Task, TaskAction, TaskMutationParams, TaskStatus } from "../tool/types.js";
 import { isTransitionValid } from "./invariants.js";
 import type { TaskState } from "./state.js";
-import { detectCycle } from "./task-graph.js";
+import { deriveBlocks, detectCycle } from "./task-graph.js";
 
 /**
  * Reducer outcome. Closed tagged union — adding a new action requires extending
@@ -14,7 +14,14 @@ import { detectCycle } from "./task-graph.js";
  */
 export type Op =
 	| { kind: "create"; taskId: number }
-	| { kind: "update"; id: number; fromStatus: TaskStatus; toStatus: TaskStatus; changed: boolean }
+	| {
+			kind: "update";
+			id: number;
+			fromStatus: TaskStatus;
+			toStatus: TaskStatus;
+			changed: boolean;
+			failedDependentIds?: number[];
+	  }
 	| { kind: "delete"; id: number; subject: string }
 	| { kind: "list"; statusFilter?: TaskStatus; includeDeleted: boolean }
 	| { kind: "get"; task: Task }
@@ -38,6 +45,36 @@ function sameNumberList(a: number[] | undefined, b: number[] | undefined): boole
 
 function sameRecord(a: Record<string, unknown> | undefined, b: Record<string, unknown> | undefined): boolean {
 	return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+function failDependents(tasks: readonly Task[], taskId: number): { tasks: Task[]; failedIds: number[] } {
+	const blocks = deriveBlocks(tasks);
+	const indexes = new Map(tasks.map((task, index) => [task.id, index]));
+	const nextTasks = [...tasks];
+	const queue = [taskId];
+	const visited = new Set<number>();
+	const failedIds: number[] = [];
+
+	while (queue.length > 0) {
+		const currentId = queue.shift()!;
+		if (visited.has(currentId)) continue;
+		visited.add(currentId);
+
+		for (const dependentId of blocks.get(currentId) ?? []) {
+			const index = indexes.get(dependentId);
+			if (index === undefined) continue;
+			const dependent = nextTasks[index];
+			if (!dependent) continue;
+
+			if (dependent.status !== "deleted" && dependent.status !== "failed") {
+				nextTasks[index] = { ...dependent, status: "failed" };
+				failedIds.push(dependentId);
+			}
+			queue.push(dependentId);
+		}
+	}
+
+	return { tasks: nextTasks, failedIds };
 }
 
 /**
@@ -84,6 +121,7 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 					const depTask = state.tasks.find((t) => t.id === dep);
 					if (!depTask) return errorResult(state, `blockedBy: #${dep} not found`);
 					if (depTask.status === "deleted") return errorResult(state, `blockedBy: #${dep} is deleted`);
+					if (depTask.status === "failed") return errorResult(state, `blockedBy: #${dep} is failed`);
 				}
 			}
 			const newTask: Task = {
@@ -144,10 +182,29 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 					const depTask = state.tasks.find((t) => t.id === dep);
 					if (!depTask) return errorResult(state, `addBlockedBy: #${dep} not found`);
 					if (depTask.status === "deleted") return errorResult(state, `addBlockedBy: #${dep} is deleted`);
+					if (depTask.status === "failed") return errorResult(state, `addBlockedBy: #${dep} is failed`);
 					if (!newBlockedBy.includes(dep)) newBlockedBy.push(dep);
 				}
 				if (detectCycle(state.tasks, current.id, newBlockedBy)) {
 					return errorResult(state, "addBlockedBy would create a cycle in the blockedBy graph");
+				}
+			}
+
+			const dependenciesChanged = !sameNumberList(current.blockedBy, newBlockedBy);
+			const effectiveStatus = params.status ?? current.status;
+			const requiresCompletedDependencies =
+				(effectiveStatus === "in_progress" || effectiveStatus === "completed") &&
+				(params.status !== undefined || dependenciesChanged);
+			if (requiresCompletedDependencies) {
+				const unfinished = newBlockedBy.flatMap((depId) => {
+					const task = state.tasks.find((candidate) => candidate.id === depId);
+					return task?.status !== "completed" ? [{ depId, task }] : [];
+				});
+				if (unfinished.length > 0) {
+					const labels = unfinished.map(({ depId, task }) =>
+						task ? `#${task.id} (${task.status})` : `#${depId} (missing)`,
+					);
+					return errorResult(state, `#${current.id} is blocked by unfinished task(s): ${labels.join(", ")}`);
 				}
 			}
 
@@ -173,14 +230,18 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 
 			const newTasks = [...state.tasks];
 			newTasks[idx] = updated;
+			const cascade = newStatus === "failed" ? failDependents(newTasks, updated.id) : undefined;
+			const finalTasks = cascade?.tasks ?? newTasks;
+			const failedDependentIds = cascade?.failedIds ?? [];
 			return {
-				state: { tasks: newTasks, nextId: state.nextId },
+				state: { tasks: finalTasks, nextId: state.nextId },
 				op: {
 					kind: "update",
 					id: updated.id,
 					fromStatus: current.status,
 					toStatus: newStatus,
-					changed: taskChanged(current, updated),
+					changed: taskChanged(current, updated) || failedDependentIds.length > 0,
+					...(failedDependentIds.length > 0 ? { failedDependentIds } : {}),
 				},
 			};
 		}

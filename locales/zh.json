@@ -4,6 +4,7 @@
   "status.pending": "待处理",
   "status.in_progress": "进行中",
   "status.completed": "已完成",
+  "status.failed": "失败",
   "status.deleted": "已删除",
 
   "overlay.heading": "任务清单",
@@ -15,5 +16,6 @@
   "command.requires_interactive": "/todos 需要交互模式",
   "command.section.pending": "── 待处理 ──",
   "command.section.in_progress": "── 进行中 ──",
-  "command.section.completed": "── 已完成 ──"
+  "command.section.completed": "── 已完成 ──",
+  "command.section.failed": "── 已失败 ──"
 }

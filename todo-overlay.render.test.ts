@@ -82,6 +82,14 @@ describe("TodoOverlay — heading", () => {
 		]);
 		expect(widget.render(200)[0]).toContain("○");
 	});
+
+	it("includes failed tasks in the total without counting them as completed", async () => {
+		const { widget } = await setup([
+			{ action: "create", subject: "failed" },
+			{ action: "update", id: 1, status: "failed" },
+		]);
+		expect(widget.render(200)[0]).toContain("Todos (0/1)");
+	});
 });
 
 describe("TodoOverlay — natural-order rendering (no overflow)", () => {
@@ -141,6 +149,35 @@ describe("TodoOverlay — per-task formatting", () => {
 		overlay.hideCompletedTasksFromPreviousTurn();
 		expect(widget.render(200)).toEqual([]);
 	});
+
+	it("failed task is struck through this turn and hidden from the overlay next turn", async () => {
+		const { widget, overlay } = await setup([
+			{ action: "create", subject: "broken" },
+			{ action: "update", id: 1, status: "failed" },
+		]);
+		expect(widget.render(200)[1]).toContain("✗");
+		expect(widget.render(200)[1]).toContain("broken");
+		overlay.hideTerminalTasksFromPreviousTurn();
+		expect(widget.render(200)).toEqual([]);
+	});
+
+	it("hides failed tasks next turn without hiding independent pending tasks", async () => {
+		const { widget, overlay } = await setup([
+			{ action: "create", subject: "root" },
+			{ action: "create", subject: "child-of-root", blockedBy: [1] },
+			{ action: "create", subject: "independent" },
+			{ action: "update", id: 1, status: "failed" },
+		]);
+		const beforeNextTurn = widget.render(200).join("\n");
+		expect(beforeNextTurn).toContain("root");
+		expect(beforeNextTurn).toContain("child-of-root");
+		expect(beforeNextTurn).toContain("independent");
+		overlay.hideTerminalTasksFromPreviousTurn();
+		const afterNextTurn = widget.render(200).join("\n");
+		expect(afterNextTurn).not.toContain("root");
+		expect(afterNextTurn).not.toContain("child-of-root");
+		expect(afterNextTurn).toContain("independent");
+	});
 });
 
 describe("TodoOverlay — showIds gate", () => {
@@ -199,6 +236,19 @@ describe("TodoOverlay — overflow collapse", () => {
 		expect(summary).toContain("+2 more");
 		expect(summary).toContain("2 pending");
 		expect(summary).not.toContain("completed");
+	});
+
+	it("reports failed tasks separately in the overflow summary", async () => {
+		const actions: Array<{ action: TaskAction; [k: string]: unknown }> = [];
+		for (let i = 1; i <= 10; i++) actions.push({ action: "create", subject: `p${i}` });
+		for (let i = 11; i <= 13; i++) {
+			actions.push({ action: "create", subject: `f${i}` });
+			actions.push({ action: "update", id: i, status: "failed" });
+		}
+		const { widget } = await setup(actions);
+		const summary = widget.render(200).slice(-2)[0];
+		expect(summary).toContain("+3 more");
+		expect(summary).toContain("3 failed");
 	});
 
 	it("summary contains both 'completed' and 'pending' when mixed overflow", async () => {
@@ -309,13 +359,13 @@ describe("TodoOverlay — collapse/expand render", () => {
 		expect(lines.some((l) => l.includes("b"))).toBe(true);
 	});
 
-	it("collapsed render short-circuits before completed-display tracking (no task queued for hide while collapsed)", async () => {
+	it("collapsed render short-circuits before terminal-display tracking (no task queued for hide while collapsed)", async () => {
 		const { widget, overlay } = await setup([
 			{ action: "create", subject: "done" },
 			{ action: "update", id: 1, status: "completed" },
 		]);
 		overlay.toggleCollapse(); // collapse
-		widget.render(200); // collapsed render — must NOT queue the completed task
+		widget.render(200); // collapsed render — must NOT queue terminal outcomes for hide
 		// Draining the pending-hide set is a no-op because nothing was queued.
 		overlay.hideCompletedTasksFromPreviousTurn();
 		overlay.toggleCollapse(); // expand

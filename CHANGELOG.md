@@ -7,6 +7,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Added terminal `failed` status, which propagates through `blockedBy` dependencies. Failed rows share completed rows' strikethrough and overlay fade-out behavior.
+- Tasks with `blockedBy` prerequisites can start or complete only after all prerequisites are completed.
+
 ## [2.11.0] - 2026-09-21
 
 ## [2.10.1] - 2026-09-13

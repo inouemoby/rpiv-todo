@@ -4,6 +4,7 @@
   "status.pending": "pendentes",
   "status.in_progress": "em andamento",
   "status.completed": "concluídas",
+  "status.failed": "falhas",
   "status.deleted": "excluída",
 
   "overlay.heading": "Tarefas",
@@ -15,5 +16,6 @@
   "command.requires_interactive": "/todos requer modo interativo",
   "command.section.pending": "── Pendentes ──",
   "command.section.in_progress": "── Em andamento ──",
-  "command.section.completed": "── Concluídas ──"
+  "command.section.completed": "── Concluídas ──",
+  "command.section.failed": "── Falhas ──"
 }

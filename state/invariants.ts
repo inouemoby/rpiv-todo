@@ -1,16 +1,17 @@
 import type { TaskStatus } from "../tool/types.js";
 
 /**
- * Allowed forward transitions per source status. `completed` is one-way to
- * `deleted` (never back to `in_progress`); `deleted` is terminal.
+ * Allowed forward transitions per source status. `completed` can only move to
+ * a terminal outcome; both `failed` and `deleted` are terminal statuses.
  *
  * Idempotent same→same is checked separately in `isTransitionValid` so this
  * table only enumerates actual transitions.
  */
 export const VALID_TRANSITIONS: Record<TaskStatus, ReadonlySet<TaskStatus>> = {
-	pending: new Set(["in_progress", "completed", "deleted"]),
-	in_progress: new Set(["pending", "completed", "deleted"]),
-	completed: new Set(["deleted"]),
+	pending: new Set(["in_progress", "completed", "failed", "deleted"]),
+	in_progress: new Set(["pending", "completed", "failed", "deleted"]),
+	completed: new Set(["failed", "deleted"]),
+	failed: new Set(),
 	deleted: new Set(),
 };
 

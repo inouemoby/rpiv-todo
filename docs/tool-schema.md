@@ -39,7 +39,7 @@ todo({
   id?: number,
 
   // update (sets this task's status) or list (filters by status)
-  status?: "pending" | "in_progress" | "completed" | "deleted",
+  status?: "pending" | "in_progress" | "completed" | "failed" | "deleted",
 
   // list-only
   includeDeleted?: boolean,           // default false — hides tombstones
@@ -55,14 +55,17 @@ array.
 
 | From | Allowed targets |
 | --- | --- |
-| `pending` | `in_progress`, `completed`, `deleted` |
-| `in_progress` | `pending`, `completed`, `deleted` |
-| `completed` | `deleted` |
+| `pending` | `in_progress`, `completed`, `failed`, `deleted` |
+| `in_progress` | `pending`, `completed`, `failed`, `deleted` |
+| `completed` | `failed`, `deleted` |
+| `failed` | _(terminal)_ |
 | `deleted` | _(terminal)_ |
 
 A transition to the current status is always accepted and reported as a no-op.
-`delete` keeps the task as a tombstone so historic `blockedBy` references still
-resolve; tombstones are hidden from `list` unless you pass `includeDeleted: true`.
+`failed` is terminal. Setting a task to `failed` also fails its downstream
+tasks recursively. The `delete` action keeps a task as a tombstone so historic
+`blockedBy` references still resolve; deleted tombstones are hidden from `list`
+unless you pass `includeDeleted: true`.
 
 ## Dependencies
 
@@ -72,7 +75,12 @@ is mutated, so a rejected call leaves the list untouched:
 - a dependency id that does not exist is rejected;
 - a dependency that is already tombstoned is rejected;
 - blocking a task on itself is rejected;
-- an `addBlockedBy` that would close a cycle in the graph is rejected.
+- an `addBlockedBy` that would close a cycle in the graph is rejected;
+- a failed task cannot be added as a prerequisite.
+
+A task may enter `in_progress` or `completed` only when every task in its
+`blockedBy` list is completed. This prevents starting downstream work before its
+prerequisites.
 
 `get` also reports the reverse edges as a `blocks:` line, derived from the other
 tasks' `blockedBy` arrays.
@@ -90,7 +98,7 @@ tasks' `blockedBy` arrays.
       subject: string,
       description?: string,
       activeForm?: string,
-      status: "pending" | "in_progress" | "completed" | "deleted",
+      status: "pending" | "in_progress" | "completed" | "failed" | "deleted",
       blockedBy?: number[],
       owner?: string,
       metadata?: Record<string, unknown>,
@@ -134,6 +142,8 @@ that it was a no-op instead of a fresh `Updated #N`.
 | `#N not found` | No task with that id. |
 | `update requires at least one mutable field: subject, description, activeForm, status, owner, metadata, addBlockedBy, or removeBlockedBy` | `update` with only an `id`. |
 | `illegal transition completed → in_progress` | Target status not reachable from the current one. |
+| `#N is blocked by unfinished task(s): …` | A task is being started/completed, or given a new prerequisite, before all prerequisites are completed. |
+| `blockedBy: #N is failed` / `addBlockedBy: #N is failed` | A failed task cannot be used as a prerequisite. |
 | `cannot block #N on itself` | `addBlockedBy` includes the task's own id. |
 | `addBlockedBy: #N not found` / `is deleted` | Unknown or tombstoned dependency. |
 | `addBlockedBy would create a cycle in the blockedBy graph` | The edge would close a cycle. |
@@ -144,9 +154,10 @@ carries the bare message. Task state is unchanged.
 
 ## Prompt guidance
 
-The tool ships a `promptSnippet` and eight `promptGuidelines` bullets telling the
-model when to open a list, to keep exactly one task `in_progress`, to mark work
-completed immediately rather than in batches, never to complete a task with
-failing tests, and the literal `update {id, status}` call shape for changing a
-task's status. Both are overridable — see
+The tool ships a `promptSnippet` and `promptGuidelines` telling the model when
+to open a list, to keep exactly one task `in_progress`, to mark work completed
+immediately rather than in batches, how `failed` cascades only through dependent
+tasks, and the literal `update {id, status}` call shape for changing a task's
+status. A task cannot start or complete before its prerequisites are completed.
+Both are overridable — see
 [configuration.md](./configuration.md#guidance).

@@ -116,6 +116,24 @@ describe("/todos command — grouped output", () => {
 		expect(out).toContain("1/1 completed");
 	});
 
+	it("renders failure status and cascaded dependents without failing independent tasks", async () => {
+		const { tool, cmd } = setup();
+		await seed(tool, [
+			{ action: "create", subject: "root task" },
+			{ action: "create", subject: "downstream task", blockedBy: [1] },
+			{ action: "create", subject: "independent task" },
+			{ action: "update", id: 1, status: "failed" },
+		]);
+		const ctx = createMockCtx({ hasUI: true });
+		await cmd.handler("", ctx as never);
+		const out = grabOutput(ctx);
+		expect(out).toContain("2 failed");
+		expect(out).toContain("── Failed ──");
+		expect(out).toContain("✗ #1 root task");
+		expect(out).toContain("✗ #2 downstream task");
+		expect(out).toContain("○ #3 independent task");
+	});
+
 	it("emits the header parts in 'completed · in progress · pending' order", async () => {
 		const { tool, cmd } = setup();
 		await seed(tool, [

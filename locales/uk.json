@@ -4,6 +4,7 @@
   "status.pending": "очікування",
   "status.in_progress": "у роботі",
   "status.completed": "виконано",
+  "status.failed": "не виконано",
   "status.deleted": "видалено",
 
   "overlay.heading": "Завдання",
@@ -15,5 +16,6 @@
   "command.requires_interactive": "/todos потребує інтерактивного режиму",
   "command.section.pending": "── Очікування ──",
   "command.section.in_progress": "── У роботі ──",
-  "command.section.completed": "── Виконано ──"
+  "command.section.completed": "── Виконано ──",
+  "command.section.failed": "── Не виконано ──"
 }

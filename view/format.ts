@@ -18,18 +18,20 @@ export const STATUS_GLYPH: Record<TaskStatus, string> = {
 	pending: "○",
 	in_progress: "◐",
 	completed: "●",
+	failed: "✗",
 	deleted: "⊘",
 };
 
 /**
  * Color palette for the renderResult status echo. `deleted` uses `muted` so a
- * successful delete is visually distinct from the error branch (which uses
- * `error` + `✗`)..
+ * successful delete is visually distinct from a task marked `failed` (`error`
+ * + `✗`).
  */
-export const STATUS_COLOR: Record<TaskStatus, "dim" | "warning" | "success" | "muted"> = {
+export const STATUS_COLOR: Record<TaskStatus, "dim" | "warning" | "success" | "error" | "muted"> = {
 	pending: "dim",
 	in_progress: "warning",
 	completed: "success",
+	failed: "error",
 	deleted: "muted",
 };
 
@@ -47,10 +49,9 @@ export const ACTION_GLYPH: Record<TaskAction, string> = {
 };
 
 /**
- * Glyph for the persistent overlay's per-task row. Differs from `STATUS_GLYPH`
- * for `completed` (`✓` vs `●`) and `deleted` (`✗` vs `⊘`) because the
- * overlay caller never renders a `deleted` row but uses `✗` in its
- * error-toned palette..
+ * Glyph for the persistent overlay's per-task row. `completed` uses `✓` here
+ * instead of the result echo's `●`; `failed` uses an error-toned `✗`. Deleted
+ * tombstones are not rendered by the overlay.
  */
 export function overlayStatusGlyph(status: TaskStatus, theme: Theme): string {
 	switch (status) {
@@ -60,6 +61,8 @@ export function overlayStatusGlyph(status: TaskStatus, theme: Theme): string {
 			return theme.fg("warning", "◐");
 		case "completed":
 			return theme.fg("success", "✓");
+		case "failed":
+			return theme.fg("error", "✗");
 		case "deleted":
 			return theme.fg("error", "✗");
 	}
@@ -72,9 +75,15 @@ export function overlayStatusGlyph(status: TaskStatus, theme: Theme): string {
 export function formatOverlayTaskLine(t: Task, theme: Theme, showId: boolean): string {
 	const glyph = overlayStatusGlyph(t.status, theme);
 	const subjectColor =
-		t.status === "in_progress" ? "accent" : t.status === "completed" || t.status === "deleted" ? "muted" : "text";
+		t.status === "in_progress"
+			? "accent"
+			: t.status === "failed"
+				? "error"
+				: t.status === "completed" || t.status === "deleted"
+					? "muted"
+					: "text";
 	let subject = theme.fg(subjectColor, sanitizeTerminalText(t.subject));
-	if (t.status === "completed" || t.status === "deleted") {
+	if (t.status === "completed" || t.status === "failed" || t.status === "deleted") {
 		subject = theme.strikethrough(subject);
 	}
 	let line = `${glyph}`;

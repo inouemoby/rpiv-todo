@@ -36,6 +36,12 @@ describe("applyTaskMutation — create", () => {
 		expect(result.op).toEqual({ kind: "error", message: "blockedBy: #1 is deleted" });
 	});
 
+	it("rejects failed blockedBy", () => {
+		const state = stateWith(task({ id: 1, subject: "broken", status: "failed" }));
+		const result = applyTaskMutation(state, "create", { subject: "new", blockedBy: [1] });
+		expect(result.op).toEqual({ kind: "error", message: "blockedBy: #1 is failed" });
+	});
+
 	it("creates with next id and preserves immutability", () => {
 		const state = emptyState();
 		const result = applyTaskMutation(state, "create", { subject: "write tests" });
@@ -72,6 +78,84 @@ describe("applyTaskMutation — update", () => {
 		const result = applyTaskMutation(state, "update", { id: 1, status: "deleted" });
 		expect(result.op).toEqual({ kind: "update", id: 1, fromStatus: "completed", toStatus: "deleted", changed: true });
 		expect(result.state.tasks[0].status).toBe("deleted");
+	});
+
+	it("fails a task and all transitive dependents, but not independent or deleted tasks", () => {
+		const state = stateWith(
+			task({ id: 1, subject: "root", status: "in_progress" }),
+			task({ id: 2, subject: "child", blockedBy: [1] }),
+			task({ id: 3, subject: "grandchild", blockedBy: [2] }),
+			task({ id: 4, subject: "shared descendant", blockedBy: [1, 2] }),
+			task({ id: 5, subject: "independent" }),
+			task({ id: 6, subject: "deleted intermediary", status: "deleted", blockedBy: [1] }),
+			task({ id: 7, subject: "dependent of deleted intermediary", blockedBy: [6] }),
+		);
+		const result = applyTaskMutation(state, "update", { id: 1, status: "failed" });
+
+		expect(result.state.tasks.map((t) => t.status)).toEqual([
+			"failed",
+			"failed",
+			"failed",
+			"failed",
+			"pending",
+			"deleted",
+			"failed",
+		]);
+		expect(result.op).toMatchObject({
+			kind: "update",
+			id: 1,
+			fromStatus: "in_progress",
+			toStatus: "failed",
+			changed: true,
+			failedDependentIds: [2, 4, 3, 7],
+		});
+		expect(state.tasks[0]?.status).toBe("in_progress");
+	});
+
+	it("fails only the dependent chain and leaves unrelated tasks unchanged", () => {
+		const state = stateWith(
+			task({ id: 1, subject: "root", status: "in_progress" }),
+			task({ id: 2, subject: "unrelated" }),
+			task({ id: 3, subject: "downstream", blockedBy: [1] }),
+			task({ id: 4, subject: "transitive downstream", blockedBy: [3] }),
+		);
+		const result = applyTaskMutation(state, "update", { id: 1, status: "failed" });
+		expect(result.state.tasks.map((task) => task.status)).toEqual(["failed", "pending", "failed", "failed"]);
+	});
+
+	it("does not allow a failed task to recover", () => {
+		const state = stateWith(task({ id: 1, subject: "x", status: "failed" }));
+		const result = applyTaskMutation(state, "update", { id: 1, status: "pending" });
+		expect(result.op).toEqual({ kind: "error", message: "illegal transition failed → pending" });
+	});
+
+	it("rejects starting or completing a task before its prerequisites", () => {
+		const state = stateWith(
+			task({ id: 1, subject: "prerequisite" }),
+			task({ id: 2, subject: "dependent", blockedBy: [1] }),
+		);
+		for (const status of ["in_progress", "completed"] as const) {
+			const result = applyTaskMutation(state, "update", { id: 2, status });
+			expect(result.op).toEqual({
+				kind: "error",
+				message: "#2 is blocked by unfinished task(s): #1 (pending)",
+			});
+		}
+		const prerequisiteCompleted = applyTaskMutation(state, "update", { id: 1, status: "completed" }).state;
+		const result = applyTaskMutation(prerequisiteCompleted, "update", { id: 2, status: "in_progress" });
+		expect(result.op).toMatchObject({ kind: "update", id: 2, toStatus: "in_progress", changed: true });
+	});
+
+	it("rejects adding an unfinished prerequisite to an active task", () => {
+		const state = stateWith(
+			task({ id: 1, subject: "active", status: "in_progress" }),
+			task({ id: 2, subject: "unfinished prerequisite" }),
+		);
+		const result = applyTaskMutation(state, "update", { id: 1, addBlockedBy: [2] });
+		expect(result.op).toEqual({
+			kind: "error",
+			message: "#1 is blocked by unfinished task(s): #2 (pending)",
+		});
 	});
 
 	it("flags a no-effect status update (status set to its current value) as changed:false", () => {
@@ -116,6 +200,15 @@ describe("applyTaskMutation — update", () => {
 		const state = stateWith(task({ id: 1, subject: "x" }));
 		const result = applyTaskMutation(state, "update", { id: 1, addBlockedBy: [1] });
 		expect(result.op).toEqual({ kind: "error", message: "cannot block #1 on itself" });
+	});
+
+	it("rejects adding a failed task as a prerequisite", () => {
+		const state = stateWith(
+			task({ id: 1, subject: "failed prerequisite", status: "failed" }),
+			task({ id: 2, subject: "dependent" }),
+		);
+		const result = applyTaskMutation(state, "update", { id: 2, addBlockedBy: [1] });
+		expect(result.op).toEqual({ kind: "error", message: "addBlockedBy: #1 is failed" });
 	});
 
 	it("rejects cycle in blockedBy graph", () => {
@@ -207,5 +300,13 @@ describe("isTransitionValid", () => {
 
 	it("allows completed → deleted", () => {
 		expect(isTransitionValid("completed", "deleted")).toBe(true);
+	});
+
+	it("allows tasks to become failed and makes failed terminal", () => {
+		expect(isTransitionValid("pending", "failed")).toBe(true);
+		expect(isTransitionValid("in_progress", "failed")).toBe(true);
+		expect(isTransitionValid("completed", "failed")).toBe(true);
+		expect(isTransitionValid("failed", "failed")).toBe(true);
+		expect(isTransitionValid("failed", "pending")).toBe(false);
 	});
 });

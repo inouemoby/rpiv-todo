@@ -23,6 +23,22 @@ describe("formatContent", () => {
 		expect(formatContent(op, state)).toBe("Updated #1 (pending → in_progress)");
 	});
 
+	it("update — reports dependent tasks failed by a cascade", () => {
+		const state = stateWith(
+			t({ id: 1, subject: "root", status: "failed" }),
+			t({ id: 2, subject: "dependent", status: "failed", blockedBy: [1] }),
+		);
+		const op: Op = {
+			kind: "update",
+			id: 1,
+			fromStatus: "in_progress",
+			toStatus: "failed",
+			changed: true,
+			failedDependentIds: [2],
+		};
+		expect(formatContent(op, state)).toBe("Updated #1 (in_progress → failed); failed dependent tasks: #2");
+	});
+
 	it("update — omits transition when from === to but fields changed (e.g. blockedBy-only update)", () => {
 		const state = stateWith(t({ id: 1, subject: "x" }));
 		const op: Op = { kind: "update", id: 1, fromStatus: "pending", toStatus: "pending", changed: true };

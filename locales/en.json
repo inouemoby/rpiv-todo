@@ -2,6 +2,7 @@
   "status.pending": "pending",
   "status.in_progress": "in progress",
   "status.completed": "completed",
+  "status.failed": "failed",
   "status.deleted": "deleted",
 
   "overlay.heading": "Todos",
@@ -13,5 +14,6 @@
   "command.requires_interactive": "/todos requires interactive mode",
   "command.section.pending": "── Pending ──",
   "command.section.in_progress": "── In Progress ──",
-  "command.section.completed": "── Completed ──"
+  "command.section.completed": "── Completed ──",
+  "command.section.failed": "── Failed ──"
 }

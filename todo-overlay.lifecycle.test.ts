@@ -220,11 +220,13 @@ describe("TodoOverlay — lifecycle", () => {
 		expect(requestRender).toHaveBeenCalledTimes(1);
 	});
 
-	it("resetCompletedDisplayState() lets replayed completed tasks be shown once again", async () => {
+	it("resetTerminalDisplayState() lets replayed completed and failed tasks be shown once again", async () => {
 		const { captured } = registerTool();
 		await seed(captured, [
 			{ action: "create", subject: "done" },
 			{ action: "update", id: 1, status: "completed" },
+			{ action: "create", subject: "failed" },
+			{ action: "update", id: 2, status: "failed" },
 		]);
 		const overlay = new TodoOverlay();
 		const ui = makeCtx();
@@ -236,16 +238,20 @@ describe("TodoOverlay — lifecycle", () => {
 			theme: typeof identityTheme,
 		) => { render: (w: number) => string[]; invalidate: () => void };
 		const widget = factory({ requestRender: vi.fn() }, identityTheme);
-		expect(widget.render(200).join("\n")).toContain("done");
-		overlay.hideCompletedTasksFromPreviousTurn();
+		const initial = widget.render(200).join("\n");
+		expect(initial).toContain("done");
+		expect(initial).toContain("failed");
+		overlay.hideTerminalTasksFromPreviousTurn();
 		expect(widget.render(200)).toEqual([]);
-		overlay.resetCompletedDisplayState();
-		expect(widget.render(200).join("\n")).toContain("done");
+		overlay.resetTerminalDisplayState();
+		const replayed = widget.render(200).join("\n");
+		expect(replayed).toContain("done");
+		expect(replayed).toContain("failed");
 	});
 
-	it("hideCompletedTasksFromPreviousTurn() is a no-op when nothing is pending hide", () => {
+	it("hideTerminalTasksFromPreviousTurn() is a no-op when nothing is pending hide", () => {
 		const overlay = new TodoOverlay();
-		expect(() => overlay.hideCompletedTasksFromPreviousTurn()).not.toThrow();
+		expect(() => overlay.hideTerminalTasksFromPreviousTurn()).not.toThrow();
 	});
 
 	it("all-deleted todos count as empty (no widget)", async () => {
@@ -323,13 +329,13 @@ describe("TodoOverlay — collapse/expand state", () => {
 		expect(overlay.isRegistered()).toBe(false);
 	});
 
-	it("resetCompletedDisplayState() does NOT reset collapsed", async () => {
+	it("resetTerminalDisplayState() does NOT reset collapsed", async () => {
 		const { overlay, widget } = await setupRegistered();
 		overlay.toggleCollapse(); // collapsed = true
 		expect(widget.render(200).some((l) => l.includes("ctrl+shift+t to expand"))).toBe(true);
-		// resetCompletedDisplayState clears the completed-display bookkeeping but
-		// must leave the ephemeral `collapsed` flag alone (the "respect collapsed" seam).
-		overlay.resetCompletedDisplayState();
+		// Resetting terminal-display bookkeeping must leave the ephemeral `collapsed`
+		// flag alone (the "respect collapsed" seam).
+		overlay.resetTerminalDisplayState();
 		expect(widget.render(200).some((l) => l.includes("ctrl+shift+t to expand"))).toBe(true);
 	});
 });
