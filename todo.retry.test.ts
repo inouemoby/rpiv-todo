@@ -35,14 +35,15 @@ async function runBeforeSettle(
 		outcome?: "completed" | "aborted" | "error";
 		continue?: boolean;
 		pendingMessages?: unknown[];
+		entries?: unknown[];
 	} = {},
 ) {
-	await handler(
+	return handler(
 		{
 			type: "agent_before_settle",
 			outcome: options.outcome ?? "completed",
 			continue: options.continue ?? false,
-			entries: [],
+			entries: options.entries ?? [],
 			context: {
 				contextEntries: [],
 				contextMessages: [],
@@ -61,8 +62,8 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-describe("in-progress todo low-priority retry", () => {
-	it("queues one user follow-up when an in-progress task remains", async () => {
+describe("in-progress todo low-priority continuation", () => {
+	it("commits one reminder at the boundary when an in-progress task remains", async () => {
 		const { pi, handler, tool } = setup();
 		const ctx = makeCtx();
 		await createTask(tool, ctx, "pending task");
@@ -80,18 +81,23 @@ describe("in-progress todo low-priority retry", () => {
 		await createTask(tool, ctx, "failed task");
 		await callTodo(tool, ctx, { action: "update", id: 5, status: "failed" });
 
-		await runBeforeSettle(handler, ctx);
+		const result = await runBeforeSettle(handler, ctx) as
+			| { entries: unknown[]; continue: true }
+			| undefined;
 
-		expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
-		const message = (pi.sendUserMessage as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
-		expect(message).toContain('"subject":"active task"');
-		expect(message).toContain('"description":"resume the parser"');
-		expect(message).toContain('"activeForm":"writing parser tests"');
-		expect(message).not.toContain("pending task");
-		expect(message).not.toContain("completed task");
-		expect(message).not.toContain("deleted task");
-		expect(message).not.toContain("failed task");
-		expect(pi.sendUserMessage).toHaveBeenCalledWith(message, { deliverAs: "followUp" });
+		expect(pi.sendUserMessage).not.toHaveBeenCalled();
+		expect(result?.continue).toBe(true);
+		const reminder = result?.entries.at(-1) as { type: string; customType: string; content: string; display: boolean };
+		expect(reminder.type).toBe("custom_message");
+		expect(reminder.customType).toBe("rpiv-todo:in-progress-reminder");
+		expect(reminder.display).toBe(false);
+		expect(reminder.content).toContain('"subject":"active task"');
+		expect(reminder.content).toContain('"description":"resume the parser"');
+		expect(reminder.content).toContain('"activeForm":"writing parser tests"');
+		expect(reminder.content).not.toContain("pending task");
+		expect(reminder.content).not.toContain("completed task");
+		expect(reminder.content).not.toContain("deleted task");
+		expect(reminder.content).not.toContain("failed task");
 	});
 
 	it("does not retry for pending, completed, deleted, or failed tasks alone", async () => {
@@ -105,7 +111,7 @@ describe("in-progress todo low-priority retry", () => {
 		await createTask(tool, ctx, "failed task");
 		await callTodo(tool, ctx, { action: "update", id: 4, status: "failed" });
 
-		await runBeforeSettle(handler, ctx);
+		expect(await runBeforeSettle(handler, ctx)).toBeUndefined();
 
 		expect(pi.sendUserMessage).not.toHaveBeenCalled();
 	});
@@ -116,23 +122,23 @@ describe("in-progress todo low-priority retry", () => {
 		await createTask(tool, ctx, "active task");
 		await callTodo(tool, ctx, { action: "update", id: 1, status: "in_progress" });
 
-		await runBeforeSettle(handler, ctx);
-		await runBeforeSettle(handler, makeCtx(false), {
+		expect(await runBeforeSettle(handler, ctx)).toBeUndefined();
+		expect(await runBeforeSettle(handler, makeCtx(false), {
 			pendingMessages: [{ role: "user", content: "another plugin's follow-up" }],
-		});
+		})).toBeUndefined();
 
 		expect(pi.sendUserMessage).not.toHaveBeenCalled();
 	});
 
-	it("does not send a stale retry after another queued follow-up completes the task", async () => {
+	it("does not add a stale reminder after another queued follow-up completes the task", async () => {
 		const { pi, handler, tool } = setup();
 		const pendingCtx = makeCtx(true);
 		await createTask(tool, pendingCtx, "active task");
 		await callTodo(tool, pendingCtx, { action: "update", id: 1, status: "in_progress" });
 
-		await runBeforeSettle(handler, pendingCtx);
+		expect(await runBeforeSettle(handler, pendingCtx)).toBeUndefined();
 		await callTodo(tool, pendingCtx, { action: "update", id: 1, status: "completed" });
-		await runBeforeSettle(handler, makeCtx(false));
+		expect(await runBeforeSettle(handler, makeCtx(false))).toBeUndefined();
 
 		expect(pi.sendUserMessage).not.toHaveBeenCalled();
 	});
@@ -143,9 +149,9 @@ describe("in-progress todo low-priority retry", () => {
 		await createTask(tool, ctx, "active task");
 		await callTodo(tool, ctx, { action: "update", id: 1, status: "in_progress" });
 
-		await runBeforeSettle(handler, ctx, { continue: true });
-		await runBeforeSettle(handler, ctx, { outcome: "aborted" });
-		await runBeforeSettle(handler, ctx, { outcome: "error" });
+		expect(await runBeforeSettle(handler, ctx, { continue: true })).toBeUndefined();
+		expect(await runBeforeSettle(handler, ctx, { outcome: "aborted" })).toBeUndefined();
+		expect(await runBeforeSettle(handler, ctx, { outcome: "error" })).toBeUndefined();
 
 		expect(pi.sendUserMessage).not.toHaveBeenCalled();
 	});

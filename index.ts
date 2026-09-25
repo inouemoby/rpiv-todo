@@ -44,9 +44,13 @@ type I18nLoader = {
 type SettleBoundaryEvent = {
 	outcome: "completed" | "aborted" | "error";
 	continue: boolean;
+	entries: readonly unknown[];
 	context: { pendingMessages: readonly unknown[] };
 };
-type SettleBoundaryHandler = (event: SettleBoundaryEvent, ctx: ExtensionContext) => void;
+type SettleBoundaryHandler = (event: SettleBoundaryEvent, ctx: ExtensionContext) => {
+	entries: unknown[];
+	continue: true;
+} | undefined;
 
 /** Delay the overlay graph pre-warm until Pi's startup work has settled. */
 export const PREWARM_DELAY_MS = 2000;
@@ -318,8 +322,8 @@ export default function (pi: ExtensionAPI, importOverlay: TodoOverlayImporter = 
 		handler: SettleBoundaryHandler,
 	) => () => void;
 	onAgentBeforeSettle("agent_before_settle", (event, ctx) => {
-		// Lowest-priority retry: only queue after a normal run when no other
-		// extension/user message or boundary continuation is pending.
+		// Lowest-priority continuation: only append a reminder after a normal
+		// run when no other extension/user message or continuation is pending.
 		if (
 			event.outcome !== "completed" ||
 			event.continue ||
@@ -330,6 +334,21 @@ export default function (pi: ExtensionAPI, importOverlay: TodoOverlayImporter = 
 		}
 		const inProgressTasks = getState(sid(ctx)).tasks.filter((task) => task.status === "in_progress");
 		if (inProgressTasks.length === 0) return;
-		pi.sendUserMessage(formatInProgressTodoReminder(inProgressTasks), { deliverAs: "followUp" });
+		// sendUserMessage() is fire-and-forget. Its async input handlers can finish
+		// after Pi checks the queue at this boundary, stranding the reminder in
+		// the UI while the agent is idle. Commit it atomically at this boundary
+		// instead, so Pi starts the next turn without an intermediate queue.
+		return {
+			entries: [
+				...event.entries,
+				{
+					type: "custom_message",
+					customType: "rpiv-todo:in-progress-reminder",
+					content: formatInProgressTodoReminder(inProgressTasks),
+					display: false,
+				},
+			],
+			continue: true,
+		};
 	});
 }

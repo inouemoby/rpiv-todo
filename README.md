@@ -57,9 +57,11 @@ by status.
   array, or `"all"` in that same `id` field. `"all"` tombstones active tasks
   while preserving history and the id counter.
 - **In-progress tasks get a low-priority nudge.** After a completed run, if an
-  `in_progress` task remains and no other message is queued, the extension sends
-  one user follow-up asking the agent to continue, including each task's ID,
-  subject, and available details. Other task states do not trigger it.
+  `in_progress` task remains and no other message is queued, the extension
+  atomically appends one hidden reminder at Pi's settlement boundary and
+  continues the agent. The model receives each task's ID, subject, and available
+  details without leaving a follow-up stuck in the input queue. Other task
+  states do not trigger it.
 - **Finished outcomes get out of the way.** Completed and failed rows stay
   visible for the rest of the turn, then disappear from the overlay at the start
   of the next one. Their statuses remain available through `/todos`.
